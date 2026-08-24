@@ -1,0 +1,23 @@
+{
+  "name": "jpi-sidebar",
+  "version": "0.1.0",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "scripts": {
+    "test": "node --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "jpi-base": "github:josh-sola/jpi-base#semver:^0.3.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.0",
+    "@earendil-works/pi-tui": ">=0.84.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.0",
+    "@earendil-works/pi-tui": ">=0.84.0"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  }
+}
