@@ -19,6 +19,9 @@ import type { ThemeLike } from "./theme.ts";
 const RENDER_DEBOUNCE_MS = 16;
 const CLOCK_INTERVAL_MS = 30_000;
 const SUBAGENT_POLL_INTERVAL_MS = 1_000;
+// Fires just after an item's linger window closes, so eviction (checked
+// lazily in snapshot()) has already happened by the time this paints.
+const LINGER_REPAINT_BUFFER_MS = 250;
 const MIN_WIDTH = 10;
 const MAX_WIDTH = 120;
 
@@ -43,12 +46,14 @@ export default function jpiSidebar(pi: ExtensionAPI) {
 
   let enabled = true;
   let width = 40;
+  let lingerSeconds = 30;
   let tui: WidgetTui | null = null;
   let theme: ThemeLike | null = null;
   let compositor: SidebarCompositor | null = null;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let clockTimer: ReturnType<typeof setInterval> | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let lingerTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleRender = () => {
     compositor?.invalidate();
@@ -101,12 +106,24 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     return compositor !== null;
   };
 
+  // Lazy eviction in snapshot() only takes effect when something triggers a
+  // render; a linger this small could otherwise sit unevicted until the next
+  // unrelated event. One pending timer is enough — a second finishing item
+  // is covered by the first timer's repaint too, since it fires no earlier.
+  const armLingerRepaint = () => {
+    if (lingerTimer) return;
+    lingerTimer = setTimeout(() => {
+      lingerTimer = null;
+      scheduleRender();
+    }, lingerSeconds * 1000 + LINGER_REPAINT_BUFFER_MS);
+  };
+
   // pi-tasks broadcasts nothing, so the todo list is only ever as fresh as
   // the last reload; only replace it when a file was actually found and read.
   const reloadTasks = async (ctx: TaskReloadContext) => {
     const todos = await loadTaskTodos(ctx.cwd, ctx.sessionManager.getSessionId());
     if (todos !== undefined) {
-      state.setTodos(todos);
+      if (state.setTodos(todos)) armLingerRepaint();
       scheduleRender();
     }
   };
@@ -133,11 +150,18 @@ export default function jpiSidebar(pi: ExtensionAPI) {
       return;
     }
     let changed = false;
+    let becameTerminal = false;
     for (const entry of running) {
       const stats = readLiveStats(manager, entry.id);
-      if (stats && state.onSubagentLiveUpdate(entry.id, stats)) changed = true;
+      // `entry` is the same object snapshot() handed back, not a copy, so a
+      // status flip made by onSubagentLiveUpdate is visible on it immediately.
+      if (stats && state.onSubagentLiveUpdate(entry.id, stats)) {
+        changed = true;
+        if (entry.status !== "running") becameTerminal = true;
+      }
     }
     if (changed) scheduleRender();
+    if (becameTerminal) armLingerRepaint();
   };
 
   const ensureSubagentPolling = () => {
@@ -167,6 +191,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
       if (payload) {
         state.onSubagentFinished(payload, "completed");
         scheduleRender();
+        armLingerRepaint();
       }
     });
     events.on(SUBAGENT_FAILED_CHANNEL, (data) => {
@@ -174,6 +199,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
       if (payload) {
         state.onSubagentFinished(payload, "failed");
         scheduleRender();
+        armLingerRepaint();
       }
     });
   }
@@ -182,6 +208,8 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     const loaded = await loadSidebarSettings(config);
     enabled = loaded.enabled;
     width = loaded.width;
+    lingerSeconds = loaded.linger;
+    state.setLingerSeconds(lingerSeconds);
     if (loaded.issues.length > 0) {
       ctx.ui.notify(`jpi-sidebar config at ${loaded.path} has issues: ${loaded.issues.join("; ")}.`, "warning");
     }
@@ -224,6 +252,10 @@ export default function jpiSidebar(pi: ExtensionAPI) {
       clearTimeout(renderTimer);
       renderTimer = null;
     }
+    if (lingerTimer) {
+      clearTimeout(lingerTimer);
+      lingerTimer = null;
+    }
     stopSubagentPolling();
     state.onSessionShutdown();
   });
@@ -264,7 +296,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    state.onToolResult(event);
+    if (state.onToolResult(event)) armLingerRepaint();
     // After the tool ran, so pi-tasks's file already reflects the change.
     if (TASK_TOOL_PATTERN.test(event.toolName ?? "")) await reloadTasks(ctx);
     scheduleRender();

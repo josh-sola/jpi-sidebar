@@ -11,12 +11,53 @@ async function tempEnv() {
   return { PI_CODING_AGENT_DIR: directory };
 }
 
-test("defaults are enabled with width 40 when jpi.kdl has no sidebar section yet", async () => {
+test("defaults are enabled with width 40 and linger 30 when jpi.kdl has no sidebar section yet", async () => {
   const env = await tempEnv();
   const config = createSidebarConfig(env);
 
   const result = await loadSidebarSettings(config);
-  assert.deepEqual(result, { enabled: true, width: 40, path: config.path, issues: [] });
+  assert.deepEqual(result, { enabled: true, width: 40, linger: 30, path: config.path, issues: [] });
+});
+
+test("an existing stanza written before linger existed gets the default via the schema, not an issue", async () => {
+  const env = await tempEnv();
+  const config = createSidebarConfig(env);
+  await writeFile(config.path, ["sidebar {", "  enabled #true", "  width 55", "}"].join("\n"), "utf8");
+
+  const result = await loadSidebarSettings(config);
+  assert.equal(result.linger, 30);
+  assert.equal(result.width, 55);
+  assert.deepEqual(result.issues, []);
+});
+
+test("an out-of-range linger falls back to the default and reports an issue", async () => {
+  const env = await tempEnv();
+  const config = createSidebarConfig(env);
+  await writeFile(config.path, ["sidebar {", "  linger 601", "}"].join("\n"), "utf8");
+
+  const result = await loadSidebarSettings(config);
+  assert.equal(result.linger, 30);
+  assert.match(result.issues[0]!, /linger 601 is out of range 0-600/);
+});
+
+test("a negative linger also falls back to the default", async () => {
+  const env = await tempEnv();
+  const config = createSidebarConfig(env);
+  await writeFile(config.path, ["sidebar {", "  linger -1", "}"].join("\n"), "utf8");
+
+  const result = await loadSidebarSettings(config);
+  assert.equal(result.linger, 30);
+  assert.match(result.issues[0]!, /linger -1 is out of range 0-600/);
+});
+
+test("linger 0 is in range and is not clamped away", async () => {
+  const env = await tempEnv();
+  const config = createSidebarConfig(env);
+  await writeFile(config.path, ["sidebar {", "  linger 0", "}"].join("\n"), "utf8");
+
+  const result = await loadSidebarSettings(config);
+  assert.equal(result.linger, 0);
+  assert.deepEqual(result.issues, []);
 });
 
 test("an out-of-range width falls back to the default and reports an issue", async () => {

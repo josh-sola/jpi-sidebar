@@ -53,11 +53,14 @@ defaults the first time it loads if it's missing:
 sidebar {
   enabled #true
   width 40
+  linger 30
 }
 ```
 
 `width` is clamped to 10–120; a value outside that range is treated as the
-default (40) and reported as a warning at session start.
+default (40) and reported as a warning at session start. `linger` (0–600,
+default 30) is how many seconds a completed todo or a finished subagent stays
+visible before it's dropped from its panel.
 
 ## Commands
 

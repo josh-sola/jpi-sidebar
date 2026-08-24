@@ -12,6 +12,7 @@ const SUBAGENT_TOOL_EXACT = /^(task|agent)$/i;
 const SUBAGENT_TOOL_PREFIX = /^dispatch/i;
 const TPS_WINDOW_MS = 2000;
 const TITLE_MAX_LENGTH = 60;
+const DEFAULT_LINGER_SECONDS = 30;
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
@@ -236,11 +237,17 @@ export class SidebarState {
   private lastTurnMs: number | null = null;
   private tpsSamples: { t: number; tokens: number }[] = [];
   private todos: TodoItem[] = [];
+  // First-observed completion time per todo id, for linger filtering. Absent
+  // for a todo that was already completed the first time we ever saw it —
+  // it finished before we were watching, so there's nothing to linger from.
+  private readonly todoCompletedAt = new Map<string, number>();
   private readonly subagents = new Map<string, SubagentEntry>();
   // Sticky once true: a real subagents:* event proves the precise mechanism
   // works, so the misattribution-prone tool-name heuristic stands down for
   // the rest of the process, not just until the next session resets state.
   private busActive = false;
+  // Shared by both panels; set from loaded config, never read from it directly.
+  private lingerMs = DEFAULT_LINGER_SECONDS * 1000;
 
   constructor(now: () => number = Date.now) {
     this.now = now;
@@ -250,6 +257,7 @@ export class SidebarState {
   onSessionStart(ctx: SessionStartInput): void {
     this.sessionStartMs = this.now();
     this.todos = [];
+    this.todoCompletedAt.clear();
     this.subagents.clear();
     this.turnCount = 0;
     this.activeTool = null;
@@ -303,6 +311,7 @@ export class SidebarState {
     this.tpsSamples = [];
     this.title = null;
     this.todos = [];
+    this.todoCompletedAt.clear();
     this.subagents.clear();
   }
 
@@ -419,14 +428,19 @@ export class SidebarState {
     }
   }
 
-  /** Closes a heuristic-created entry by toolCallId. Bus entries close via onSubagentFinished instead. */
-  onToolResult(event: ToolResultInput): void {
+  /**
+   * Closes a heuristic-created entry by toolCallId. Bus entries close via
+   * onSubagentFinished instead. Returns whether an entry actually closed, so
+   * index.ts knows whether to arm the linger repaint.
+   */
+  onToolResult(event: ToolResultInput): boolean {
     const toolCallId = event.toolCallId ?? event.toolName ?? "";
     const active = this.subagents.get(toolCallId);
-    if (!active) return;
+    if (!active) return false;
 
     active.status = event.isError ? "failed" : "completed";
     active.completedAt = this.now();
+    return true;
   }
 
   onToolExecutionStart(event: ToolExecutionStartInput): void {
@@ -498,9 +512,45 @@ export class SidebarState {
     return true;
   }
 
-  /** Wholesale replacement from a pi-tasks file reload; see tasks.ts. */
-  setTodos(todos: TodoItem[]): void {
+  /**
+   * Wholesale replacement from a pi-tasks file reload; see tasks.ts. pi-tasks
+   * never deletes completed tasks, so this also tracks *when* each one first
+   * turned completed, since that (not the file) is what lingering measures.
+   * Returns whether any item newly completed, so index.ts knows whether to
+   * arm the linger repaint.
+   */
+  setTodos(todos: TodoItem[]): boolean {
+    const previousById = new Map(this.todos.map((todo) => [todo.id, todo]));
+    let newlyCompleted = false;
+
+    for (const todo of todos) {
+      if (todo.status !== "completed") {
+        // Reopened (or still open): any earlier completion no longer applies,
+        // so a future re-completion starts its linger fresh.
+        this.todoCompletedAt.delete(todo.id);
+        continue;
+      }
+      const previous = previousById.get(todo.id);
+      if (previous !== undefined && previous.status !== "completed") {
+        this.todoCompletedAt.set(todo.id, this.now());
+        newlyCompleted = true;
+      }
+      // Already completed last time, or never seen before: keep whatever
+      // timestamp already exists (possibly none — see the field comment).
+    }
+
+    const nextIds = new Set(todos.map((todo) => todo.id));
+    for (const id of this.todoCompletedAt.keys()) {
+      if (!nextIds.has(id)) this.todoCompletedAt.delete(id);
+    }
+
     this.todos = todos;
+    return newlyCompleted;
+  }
+
+  /** Seconds a finished subagent or completed todo stays visible before eviction. */
+  setLingerSeconds(seconds: number): void {
+    this.lingerMs = seconds * 1000;
   }
 
   private applyContextUsage(ctx: ContextUsageInput): void {
@@ -518,13 +568,40 @@ export class SidebarState {
 
   snapshot(): SidebarSnapshot {
     const now = this.now();
-    // Staleness is derived at read time rather than timer-driven, so a
-    // sidebar that isn't being painted doesn't need a live timer at all.
-    const subagents = [...this.subagents.values()].map((entry) =>
-      entry.status === "running" && now - entry.startedAt > SUBAGENT_STALE_MS
-        ? { ...entry, status: "lost" as const }
-        : entry,
-    );
+
+    // Staleness and linger are both derived at read time rather than
+    // timer-driven, so a sidebar that isn't being painted needs no timers.
+    // The "lost" flip is written back into the stored entry (not just this
+    // view) so its linger clock starts once, at the moment it actually
+    // flipped, rather than being recomputed — and reset — on every read.
+    for (const entry of this.subagents.values()) {
+      if (entry.status === "running" && now - entry.startedAt > SUBAGENT_STALE_MS) {
+        entry.status = "lost";
+        entry.completedAt = now;
+      }
+    }
+    for (const [id, entry] of this.subagents) {
+      if (entry.status !== "running" && entry.completedAt !== undefined && now - entry.completedAt > this.lingerMs) {
+        this.subagents.delete(id);
+      }
+    }
+
+    const todos: TodoItem[] = [];
+    for (const todo of this.todos) {
+      if (todo.status !== "completed") {
+        todos.push(todo);
+        continue;
+      }
+      const completedAt = this.todoCompletedAt.get(todo.id);
+      if (completedAt === undefined) continue; // already completed before we ever saw it
+      if (now - completedAt > this.lingerMs) {
+        this.todoCompletedAt.delete(todo.id);
+        continue;
+      }
+      todos.push(todo);
+    }
+
+    const subagents = [...this.subagents.values()];
 
     return {
       sessionTitle: this.title,
@@ -544,7 +621,7 @@ export class SidebarState {
       liveTps: this.liveTps,
       lastTps: this.lastTps,
       lastTurnMs: this.lastTurnMs,
-      todos: [...this.todos],
+      todos,
       subagents,
     };
   }

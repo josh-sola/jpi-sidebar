@@ -116,10 +116,14 @@ test("the heuristic detects an exact agent tool name and closes it on tool_resul
   assert.equal(snapshot.subagents[0]!.name, "Refactor the parser");
   assert.equal(snapshot.subagents[0]!.status, "running");
 
-  state.onToolResult({ toolCallId: "call-1", isError: false });
+  assert.equal(state.onToolResult({ toolCallId: "call-1", isError: false }), true);
   snapshot = state.snapshot();
   assert.equal(snapshot.subagents[0]!.status, "completed");
   assert.equal(typeof snapshot.subagents[0]!.completedAt, "number");
+
+  // A tool_result for anything else (or an already-closed id) is not a transition.
+  assert.equal(state.onToolResult({ toolCallId: "call-1", isError: false }), true); // still finds the entry, re-closes it
+  assert.equal(state.onToolResult({ toolCallId: "no-such-call" }), false);
 });
 
 test("a failed heuristic tool_result is marked failed, and a dispatch* prefix also matches", () => {
@@ -257,6 +261,103 @@ test("a terminal bus event wins over a stale poll: live updates stop applying on
   assert.equal(stillFinished.toolUses, 9);
   assert.equal(stillFinished.tokens, 999);
   assert.equal(stillFinished.status, "completed");
+});
+
+test("a finished subagent lingers, then is evicted, keyed on the injected clock", () => {
+  const clock = makeClock();
+  const state = new SidebarState(clock.now);
+  state.setLingerSeconds(10);
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+
+  clock.advance(1000);
+  state.onSubagentFinished({ id: "agent-1" }, "completed");
+  assert.equal(state.snapshot().subagents.length, 1); // still visible right after finishing
+
+  clock.advance(10_000); // exactly the linger window: not yet over it
+  assert.equal(state.snapshot().subagents.length, 1);
+
+  clock.advance(1);
+  assert.equal(state.snapshot().subagents.length, 0);
+});
+
+test("a lost subagent's linger is measured from the moment it was marked lost, not from startedAt", () => {
+  const clock = makeClock();
+  const state = new SidebarState(clock.now);
+  state.setLingerSeconds(10);
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+
+  clock.advance(SUBAGENT_STALE_MS + 1);
+  const lost = state.snapshot().subagents[0]!;
+  assert.equal(lost.status, "lost");
+  assert.equal(lost.completedAt, SUBAGENT_STALE_MS + 1); // the moment staleness flipped it
+
+  // Almost the whole linger window has passed since startedAt, but only an
+  // instant has passed since it actually went lost — still visible.
+  clock.advance(9000);
+  assert.equal(state.snapshot().subagents.length, 1);
+
+  clock.advance(1001);
+  assert.equal(state.snapshot().subagents.length, 0);
+});
+
+test("linger 0 shows a finished subagent once, then evicts it on the next snapshot", () => {
+  const clock = makeClock();
+  const state = new SidebarState(clock.now);
+  state.setLingerSeconds(0);
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+  state.onSubagentFinished({ id: "agent-1" }, "completed");
+
+  assert.equal(state.snapshot().subagents.length, 1);
+  clock.advance(1);
+  assert.equal(state.snapshot().subagents.length, 0);
+});
+
+test("a todo transition to completed becomes visible and lingers, then is evicted", () => {
+  const clock = makeClock();
+  const state = new SidebarState(clock.now);
+  state.setLingerSeconds(10);
+  state.onSessionStart({});
+
+  state.setTodos([{ id: "1", content: "write tests", status: "in_progress" }]);
+  assert.deepEqual(state.snapshot().todos, [{ id: "1", content: "write tests", status: "in_progress" }]);
+
+  clock.advance(1000);
+  const newlyCompleted = state.setTodos([{ id: "1", content: "write tests", status: "completed" }]);
+  assert.equal(newlyCompleted, true);
+  assert.equal(state.snapshot().todos.length, 1);
+
+  clock.advance(10_001);
+  assert.equal(state.snapshot().todos.length, 0);
+});
+
+test("a todo already completed the first time it's seen (e.g. session_start reload) is never shown", () => {
+  const state = new SidebarState();
+  state.onSessionStart({});
+
+  const newlyCompleted = state.setTodos([{ id: "1", content: "old task", status: "completed" }]);
+  assert.equal(newlyCompleted, false);
+  assert.deepEqual(state.snapshot().todos, []);
+});
+
+test("setTodos reports false, and a reopened todo starts a fresh linger on its next completion", () => {
+  const clock = makeClock();
+  const state = new SidebarState(clock.now);
+  state.setLingerSeconds(10);
+  state.onSessionStart({});
+
+  assert.equal(state.setTodos([{ id: "1", content: "task", status: "pending" }]), false);
+  assert.equal(state.setTodos([{ id: "1", content: "task", status: "completed" }]), true);
+
+  clock.advance(5000);
+  // Reopened, then re-completed: this is a fresh completion, not the stale one from 5s ago.
+  assert.equal(state.setTodos([{ id: "1", content: "task", status: "pending" }]), false);
+  assert.equal(state.setTodos([{ id: "1", content: "task", status: "completed" }]), true);
+
+  clock.advance(10_000); // 10s since the fresh completion — still within a 10s linger
+  assert.equal(state.snapshot().todos.length, 1);
 });
 
 test("active tool tracking starts and clears with execution events", () => {
