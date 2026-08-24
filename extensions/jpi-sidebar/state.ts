@@ -1,8 +1,15 @@
+import { SUBAGENT_STALE_MS, type SubagentFinishedPayload, type SubagentStartedPayload } from "./subagents-bus.ts";
+
 const TODO_TOOL_PATTERN = /todo/i;
-const SUBAGENT_TOOL_PATTERN = /^(task|dispatch|agent)/i;
-const TOOL_LOG_MAX = 10;
+// pi-tasks tool names (TaskCreate, TaskUpdate, ...) — gates the /todo/i
+// fallback so it never double-counts todos pi-tasks already manages via file.
+export const TASK_TOOL_PATTERN = /^Task[A-Z]/;
+// Heuristic fallback only: exact "task"/"agent", or a "dispatch*" prefix.
+// Deliberately narrower than "starts with task" so it can't match pi-tasks's
+// TaskCreate/TaskUpdate/etc, which are a different package entirely.
+const SUBAGENT_TOOL_EXACT = /^(task|agent)$/i;
+const SUBAGENT_TOOL_PREFIX = /^dispatch/i;
 const TPS_WINDOW_MS = 2000;
-const TOOL_PREVIEW_LENGTH = 40;
 const TITLE_MAX_LENGTH = 60;
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
@@ -13,18 +20,19 @@ export interface TodoItem {
   status: TodoStatus;
 }
 
-export type SubagentStatus = "running" | "completed" | "failed";
+export type SubagentStatus = "running" | "completed" | "failed" | "lost";
 
 export interface SubagentEntry {
   id: string;
   name: string;
+  type?: string;
   status: SubagentStatus;
   startedAt: number;
   completedAt?: number;
-  turns: number;
-  toolCount: number;
-  tokens: number;
-  toolLog: string[];
+  toolUses?: number;
+  /** Total tokens from the bus's final stats; unset for heuristic entries. */
+  tokens?: number;
+  durationMs?: number;
 }
 
 export interface SidebarSnapshot {
@@ -145,18 +153,6 @@ function truncateTitle(text: string): string {
   return line.length > TITLE_MAX_LENGTH ? `${line.slice(0, TITLE_MAX_LENGTH - 1)}…` : line;
 }
 
-function describeToolInput(input: unknown): string {
-  if (typeof input === "string") return input.slice(0, TOOL_PREVIEW_LENGTH);
-  if (input && typeof input === "object") {
-    try {
-      return JSON.stringify(input).slice(0, TOOL_PREVIEW_LENGTH);
-    } catch {
-      return "";
-    }
-  }
-  return "";
-}
-
 export function parseTodos(input: unknown): TodoItem[] | null {
   if (!input || typeof input !== "object") return null;
 
@@ -193,9 +189,15 @@ export function extractSubagentName(input: unknown): string {
   return name.split("\n")[0]!.slice(0, TITLE_MAX_LENGTH);
 }
 
+function isHeuristicSubagentTool(toolName: string): boolean {
+  return SUBAGENT_TOOL_EXACT.test(toolName) || SUBAGENT_TOOL_PREFIX.test(toolName);
+}
+
 /**
- * Accumulates sidebar state from official pi extension events. Every mutating
- * method mirrors one event; `snapshot()` is the only way panels read it.
+ * Accumulates sidebar state from official pi extension events, plus (when
+ * present) the pi-subagents event bus and pi-tasks's task file. Every
+ * mutating method mirrors one event; `snapshot()` is the only way panels
+ * read it.
  */
 export class SidebarState {
   private readonly now: () => number;
@@ -222,7 +224,10 @@ export class SidebarState {
   private tpsSamples: { t: number; tokens: number }[] = [];
   private todos: TodoItem[] = [];
   private readonly subagents = new Map<string, SubagentEntry>();
-  private activeSubagentId: string | null = null;
+  // Sticky once true: a real subagents:* event proves the precise mechanism
+  // works, so the misattribution-prone tool-name heuristic stands down for
+  // the rest of the process, not just until the next session resets state.
+  private busActive = false;
 
   constructor(now: () => number = Date.now) {
     this.now = now;
@@ -233,7 +238,6 @@ export class SidebarState {
     this.sessionStartMs = this.now();
     this.todos = [];
     this.subagents.clear();
-    this.activeSubagentId = null;
     this.turnCount = 0;
     this.activeTool = null;
     this.tokensIn = 0;
@@ -287,7 +291,6 @@ export class SidebarState {
     this.title = null;
     this.todos = [];
     this.subagents.clear();
-    this.activeSubagentId = null;
   }
 
   onBeforeAgentStart(event: BeforeAgentStartInput, ctx: ContextUsageInput): void {
@@ -380,54 +383,30 @@ export class SidebarState {
     }
     this.liveTps = null;
     this.msgStartMs = null;
-
-    if (this.activeSubagentId) {
-      const active = this.subagents.get(this.activeSubagentId);
-      if (active) {
-        active.turns += 1;
-        if (typeof usage?.output === "number") {
-          active.tokens += (usage.input ?? 0) + usage.output;
-        }
-      }
-    }
   }
 
+  /** Vanilla todo tools only — pi-tasks tools reload from its own file instead (see tasks.ts). */
   onToolCall(event: ToolCallInput): void {
     const toolName = event.toolName ?? "";
     const toolCallId = event.toolCallId ?? toolName;
 
-    if (TODO_TOOL_PATTERN.test(toolName)) {
+    if (!TASK_TOOL_PATTERN.test(toolName) && TODO_TOOL_PATTERN.test(toolName)) {
       const parsed = parseTodos(event.input);
       if (parsed !== null) this.todos = parsed;
       return;
     }
 
-    if (SUBAGENT_TOOL_PATTERN.test(toolName)) {
+    if (!this.busActive && isHeuristicSubagentTool(toolName)) {
       this.subagents.set(toolCallId, {
         id: toolCallId,
         name: extractSubagentName(event.input),
         status: "running",
         startedAt: this.now(),
-        turns: 0,
-        toolCount: 0,
-        tokens: 0,
-        toolLog: [],
       });
-      this.activeSubagentId = toolCallId;
-      return;
-    }
-
-    if (this.activeSubagentId) {
-      const active = this.subagents.get(this.activeSubagentId);
-      if (active) {
-        const preview = describeToolInput(event.input);
-        active.toolLog.push(preview ? `${toolName}: ${preview}` : toolName);
-        if (active.toolLog.length > TOOL_LOG_MAX) active.toolLog.shift();
-        active.toolCount += 1;
-      }
     }
   }
 
+  /** Closes a heuristic-created entry by toolCallId. Bus entries close via onSubagentFinished instead. */
   onToolResult(event: ToolResultInput): void {
     const toolCallId = event.toolCallId ?? event.toolName ?? "";
     const active = this.subagents.get(toolCallId);
@@ -435,7 +414,6 @@ export class SidebarState {
 
     active.status = event.isError ? "failed" : "completed";
     active.completedAt = this.now();
-    if (this.activeSubagentId === toolCallId) this.activeSubagentId = null;
   }
 
   onToolExecutionStart(event: ToolExecutionStartInput): void {
@@ -444,6 +422,43 @@ export class SidebarState {
 
   onToolExecutionEnd(): void {
     this.activeTool = null;
+  }
+
+  /** Any subagents:* bus event, including the payload-less `ready` signal. */
+  markSubagentBusActive(): void {
+    this.busActive = true;
+  }
+
+  onSubagentStarted(payload: SubagentStartedPayload): void {
+    this.busActive = true;
+    this.subagents.set(payload.id, {
+      id: payload.id,
+      name: payload.description ?? payload.id,
+      type: payload.type,
+      status: "running",
+      startedAt: this.now(),
+    });
+  }
+
+  onSubagentFinished(payload: SubagentFinishedPayload, status: "completed" | "failed"): void {
+    this.busActive = true;
+    const existing = this.subagents.get(payload.id);
+    this.subagents.set(payload.id, {
+      id: payload.id,
+      name: payload.description ?? existing?.name ?? payload.id,
+      type: payload.type ?? existing?.type,
+      status,
+      startedAt: existing?.startedAt ?? this.now(),
+      completedAt: this.now(),
+      toolUses: payload.toolUses,
+      tokens: payload.tokens?.total,
+      durationMs: payload.durationMs,
+    });
+  }
+
+  /** Wholesale replacement from a pi-tasks file reload; see tasks.ts. */
+  setTodos(todos: TodoItem[]): void {
+    this.todos = todos;
   }
 
   private applyContextUsage(ctx: ContextUsageInput): void {
@@ -460,6 +475,15 @@ export class SidebarState {
   }
 
   snapshot(): SidebarSnapshot {
+    const now = this.now();
+    // Staleness is derived at read time rather than timer-driven, so a
+    // sidebar that isn't being painted doesn't need a live timer at all.
+    const subagents = [...this.subagents.values()].map((entry) =>
+      entry.status === "running" && now - entry.startedAt > SUBAGENT_STALE_MS
+        ? { ...entry, status: "lost" as const }
+        : entry,
+    );
+
     return {
       sessionTitle: this.title,
       modelName: this.modelName,
@@ -479,7 +503,7 @@ export class SidebarState {
       lastTps: this.lastTps,
       lastTurnMs: this.lastTurnMs,
       todos: [...this.todos],
-      subagents: [...this.subagents.values()],
+      subagents,
     };
   }
 }

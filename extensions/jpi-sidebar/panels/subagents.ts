@@ -2,12 +2,18 @@ import { formatCount, formatDuration, formatRelativeTime, truncate } from "../fo
 import type { SidebarSnapshot, SubagentEntry } from "../state.ts";
 import type { ThemeLike } from "../theme.ts";
 
-const TOOL_LOG_PREVIEW = 3;
+function finalStats(agent: SubagentEntry): string | undefined {
+  const parts: string[] = [];
+  if (typeof agent.toolUses === "number") parts.push(`${agent.toolUses} tools`);
+  if (typeof agent.tokens === "number") parts.push(`${formatCount(agent.tokens)} tokens`);
+  if (typeof agent.durationMs === "number") parts.push(formatDuration(agent.durationMs));
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
 
 function renderSubagentBlock(agent: SubagentEntry, width: number, theme: ThemeLike, now: number): string[] {
   const lines: string[] = [];
-  const elapsed = now - agent.startedAt;
   const contentMax = Math.max(0, width - 2);
+  const label = agent.type ? `${agent.name} (${agent.type})` : agent.name;
 
   let glyph: string;
   let nameColor: string;
@@ -17,29 +23,31 @@ function renderSubagentBlock(agent: SubagentEntry, width: number, theme: ThemeLi
   } else if (agent.status === "failed") {
     glyph = theme.fg("warning", "✗");
     nameColor = "warning";
+  } else if (agent.status === "lost") {
+    glyph = theme.fg("dim", "?");
+    nameColor = "dim";
   } else {
     glyph = theme.fg("accent", "●");
     nameColor = "accent";
   }
 
-  lines.push(`${glyph} ${theme.fg(nameColor, truncate(agent.name, contentMax))}`);
+  lines.push(`${glyph} ${theme.fg(nameColor, truncate(label, contentMax))}`);
 
-  const meta = `${agent.turns} turns · ${agent.toolCount} tools · ${formatCount(agent.tokens)} tokens`;
-  if (agent.status === "completed" && agent.completedAt !== undefined) {
-    lines.push(theme.fg("dim", `  complete (${formatRelativeTime(now - agent.completedAt)})`));
-    const duration = formatDuration(agent.completedAt - agent.startedAt);
-    lines.push(theme.fg("dim", `  ${truncate(`${meta} · ${duration}`, contentMax)}`));
-  } else if (agent.status === "failed") {
-    lines.push(theme.fg("dim", `  failed (${formatRelativeTime(elapsed)})`));
-    lines.push(theme.fg("dim", `  ${truncate(meta, contentMax)}`));
-  } else {
-    lines.push(theme.fg("dim", `  running (${formatDuration(elapsed)})`));
-    lines.push(theme.fg("dim", `  ${truncate(meta, contentMax)}`));
+  if (agent.status === "running") {
+    lines.push(theme.fg("dim", `  running (${formatDuration(now - agent.startedAt)})`));
+    return lines;
+  }
+  if (agent.status === "lost") {
+    lines.push(theme.fg("dim", "  lost (no update in 30m)"));
+    return lines;
   }
 
-  for (const entry of agent.toolLog.slice(-TOOL_LOG_PREVIEW)) {
-    lines.push(theme.fg("dim", `  ${truncate(entry, contentMax)}`));
-  }
+  const verb = agent.status === "completed" ? "complete" : "failed";
+  const suffix = agent.completedAt !== undefined ? ` (${formatRelativeTime(now - agent.completedAt)})` : "";
+  lines.push(theme.fg("dim", `  ${verb}${suffix}`));
+
+  const stats = finalStats(agent);
+  if (stats) lines.push(theme.fg("dim", `  ${truncate(stats, contentMax)}`));
 
   return lines;
 }

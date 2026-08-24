@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { extractSubagentName, parseTodos, SidebarState } from "../extensions/jpi-sidebar/state.ts";
+import { SUBAGENT_STALE_MS } from "../extensions/jpi-sidebar/subagents-bus.ts";
 
 function makeClock(start = 0) {
   let current = start;
@@ -105,40 +106,95 @@ test("todo tool calls replace the todo list on valid shapes and are ignored on i
   assert.deepEqual(state.snapshot().todos, [{ id: "0", content: "write tests", status: "in_progress" }]);
 });
 
-test("subagent tool calls open an entry, log activity while active, and close on tool_result", () => {
-  const clock = makeClock();
-  const state = new SidebarState(clock.now);
+test("the heuristic detects an exact agent tool name and closes it on tool_result, when the bus is inactive", () => {
+  const state = new SidebarState();
   state.onSessionStart({});
 
-  state.onToolCall({ toolName: "task", toolCallId: "call-1", input: { description: "Refactor the parser\nmore" } });
+  state.onToolCall({ toolName: "agent", toolCallId: "call-1", input: { description: "Refactor the parser\nmore" } });
   let snapshot = state.snapshot();
   assert.equal(snapshot.subagents.length, 1);
   assert.equal(snapshot.subagents[0]!.name, "Refactor the parser");
   assert.equal(snapshot.subagents[0]!.status, "running");
 
-  clock.advance(10);
-  state.onToolCall({ toolName: "bash", toolCallId: "call-2", input: { command: "ls" } });
-  snapshot = state.snapshot();
-  assert.equal(snapshot.subagents[0]!.toolCount, 1);
-  assert.equal(snapshot.subagents[0]!.toolLog.length, 1);
-  assert.match(snapshot.subagents[0]!.toolLog[0]!, /^bash: /);
-
   state.onToolResult({ toolCallId: "call-1", isError: false });
   snapshot = state.snapshot();
   assert.equal(snapshot.subagents[0]!.status, "completed");
   assert.equal(typeof snapshot.subagents[0]!.completedAt, "number");
-
-  // Tool calls after completion are no longer attributed to the closed subagent.
-  state.onToolCall({ toolName: "bash", toolCallId: "call-3", input: {} });
-  assert.equal(state.snapshot().subagents[0]!.toolCount, 1);
 });
 
-test("a failed subagent tool_result is marked failed", () => {
+test("a failed heuristic tool_result is marked failed, and a dispatch* prefix also matches", () => {
   const state = new SidebarState();
   state.onSessionStart({});
   state.onToolCall({ toolName: "dispatch_agent", toolCallId: "call-1", input: { name: "Investigate bug" } });
   state.onToolResult({ toolCallId: "call-1", isError: true });
   assert.equal(state.snapshot().subagents[0]!.status, "failed");
+});
+
+test("the heuristic does not match pi-tasks tool names like TaskCreate", () => {
+  const state = new SidebarState();
+  state.onSessionStart({});
+  state.onToolCall({ toolName: "TaskCreate", toolCallId: "call-1", input: { subject: "write tests" } });
+  assert.deepEqual(state.snapshot().subagents, []);
+});
+
+test("a bus event suppresses the tool-name heuristic from then on", () => {
+  const state = new SidebarState();
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1", description: "Investigate bug" });
+  state.onToolCall({ toolName: "agent", toolCallId: "call-1", input: {} });
+  assert.equal(state.snapshot().subagents.length, 1);
+  assert.equal(state.snapshot().subagents[0]!.id, "agent-1");
+});
+
+test("a bus started -> completed sequence populates final stats from the completed payload", () => {
+  const clock = makeClock();
+  const state = new SidebarState(clock.now);
+  state.onSessionStart({});
+
+  state.onSubagentStarted({ id: "agent-1", type: "explorer", description: "Survey the repo" });
+  assert.equal(state.snapshot().subagents[0]!.status, "running");
+
+  clock.advance(5000);
+  state.onSubagentFinished(
+    {
+      id: "agent-1",
+      type: "explorer",
+      description: "Survey the repo",
+      toolUses: 7,
+      durationMs: 5000,
+      tokens: { input: 100, output: 200, total: 300 },
+    },
+    "completed",
+  );
+
+  const entry = state.snapshot().subagents[0]!;
+  assert.equal(entry.status, "completed");
+  assert.equal(entry.toolUses, 7);
+  assert.equal(entry.tokens, 300);
+  assert.equal(entry.durationMs, 5000);
+  assert.equal(entry.completedAt, 5000);
+  assert.equal(entry.startedAt, 0);
+});
+
+test("a bus subagents:failed event marks the entry failed", () => {
+  const state = new SidebarState();
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+  state.onSubagentFinished({ id: "agent-1" }, "failed");
+  assert.equal(state.snapshot().subagents[0]!.status, "failed");
+});
+
+test("a running bus entry with no terminal event goes lost after 30 minutes", () => {
+  const clock = makeClock();
+  const state = new SidebarState(clock.now);
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+
+  clock.advance(SUBAGENT_STALE_MS - 1);
+  assert.equal(state.snapshot().subagents[0]!.status, "running");
+
+  clock.advance(2);
+  assert.equal(state.snapshot().subagents[0]!.status, "lost");
 });
 
 test("active tool tracking starts and clears with execution events", () => {

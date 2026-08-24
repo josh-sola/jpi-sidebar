@@ -103,10 +103,6 @@ function agent(overrides: Partial<SubagentEntry> = {}): SubagentEntry {
     name: "Investigate bug",
     status: "running",
     startedAt: 0,
-    turns: 2,
-    toolCount: 4,
-    tokens: 1500,
-    toolLog: [],
     ...overrides,
   };
 }
@@ -115,37 +111,43 @@ test("subagents panel reports an empty state", () => {
   assert.deepEqual(renderSubagentsPanel(baseSnapshot(), 40, theme, 0), ["  (no subagents)"]);
 });
 
-test("subagents panel renders running, completed, and failed blocks distinctly", () => {
+test("subagents panel renders running, completed, failed, and lost blocks distinctly", () => {
   const running = renderSubagentsPanel(baseSnapshot({ subagents: [agent({ status: "running" })] }), 40, theme, 5000).join("\n");
   assert.match(running, /●.*Investigate bug/);
   assert.match(running, /running \(5s\)/);
 
   const completed = renderSubagentsPanel(
-    baseSnapshot({ subagents: [agent({ status: "completed", completedAt: 4000 })] }),
+    baseSnapshot({
+      subagents: [agent({ status: "completed", completedAt: 4000, toolUses: 3, tokens: 1500, durationMs: 4000 })],
+    }),
     40,
     theme,
     5000,
   ).join("\n");
   assert.match(completed, /✓.*Investigate bug/);
   assert.match(completed, /complete \(1s ago\)/);
+  assert.match(completed, /3 tools · 2k tokens · 4s/);
 
-  const failed = renderSubagentsPanel(baseSnapshot({ subagents: [agent({ status: "failed" })] }), 40, theme, 5000).join(
-    "\n",
-  );
+  const failed = renderSubagentsPanel(
+    baseSnapshot({ subagents: [agent({ status: "failed", completedAt: 5000 })] }),
+    40,
+    theme,
+    5000,
+  ).join("\n");
   assert.match(failed, /✗.*Investigate bug/);
-  assert.match(failed, /failed \(5s ago\)/);
+  assert.match(failed, /failed \(0s ago\)/);
+
+  const lost = renderSubagentsPanel(baseSnapshot({ subagents: [agent({ status: "lost" })] }), 40, theme, 5000).join("\n");
+  assert.match(lost, /Investigate bug/);
+  assert.match(lost, /lost/);
 });
 
-test("subagents panel shows only the last three tool log entries and blank-separates multiple agents", () => {
-  const busy = agent({ toolLog: ["a", "b", "c", "d", "e"] });
+test("subagents panel shows the type next to the name, and blank-separates multiple agents", () => {
+  const typed = agent({ type: "explorer" });
   const other = agent({ id: "2", name: "Second" });
-  const lines = renderSubagentsPanel(baseSnapshot({ subagents: [busy, other] }), 40, theme, 0);
+  const lines = renderSubagentsPanel(baseSnapshot({ subagents: [typed, other] }), 40, theme, 0);
 
-  const joined = lines.join("\n");
-  assert.doesNotMatch(joined, /\ba\b/);
-  assert.match(joined, /\bc\b/);
-  assert.match(joined, /\bd\b/);
-  assert.match(joined, /\be\b/);
+  assert.match(lines[0]!, /Investigate bug \(explorer\)/);
   assert.ok(lines.includes(""));
 });
 

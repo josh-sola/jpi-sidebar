@@ -3,7 +3,16 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type CompositorTerminal, SidebarCompositor } from "./compositor.ts";
 import { createSidebarConfig, loadSidebarSettings } from "./config.ts";
 import { renderSidebar } from "./sidebar.ts";
-import { SidebarState } from "./state.ts";
+import { TASK_TOOL_PATTERN, SidebarState } from "./state.ts";
+import {
+  parseSubagentFinished,
+  parseSubagentStarted,
+  SUBAGENT_COMPLETED_CHANNEL,
+  SUBAGENT_FAILED_CHANNEL,
+  SUBAGENT_READY_CHANNEL,
+  SUBAGENT_STARTED_CHANNEL,
+} from "./subagents-bus.ts";
+import { loadTaskTodos } from "./tasks.ts";
 import type { ThemeLike } from "./theme.ts";
 
 const RENDER_DEBOUNCE_MS = 16;
@@ -19,6 +28,11 @@ interface WidgetTui {
 
 interface NotifyContext {
   ui: { notify(message: string, level?: "info" | "warning" | "error"): void };
+}
+
+interface TaskReloadContext {
+  cwd: string;
+  sessionManager: { getSessionId(): string };
 }
 
 export default function jpiSidebar(pi: ExtensionAPI) {
@@ -84,6 +98,46 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     return compositor !== null;
   };
 
+  // pi-tasks broadcasts nothing, so the todo list is only ever as fresh as
+  // the last reload; only replace it when a file was actually found and read.
+  const reloadTasks = async (ctx: TaskReloadContext) => {
+    const todos = await loadTaskTodos(ctx.cwd, ctx.sessionManager.getSessionId());
+    if (todos !== undefined) {
+      state.setTodos(todos);
+      scheduleRender();
+    }
+  };
+
+  // Subscribed once for the process's life, not per session: pi-subagents
+  // fires subagents:ready on every session_start, and busActive is sticky.
+  if (pi.events && typeof pi.events.on === "function") {
+    const events = pi.events;
+    events.on(SUBAGENT_READY_CHANNEL, () => {
+      state.markSubagentBusActive();
+    });
+    events.on(SUBAGENT_STARTED_CHANNEL, (data) => {
+      const payload = parseSubagentStarted(data);
+      if (payload) {
+        state.onSubagentStarted(payload);
+        scheduleRender();
+      }
+    });
+    events.on(SUBAGENT_COMPLETED_CHANNEL, (data) => {
+      const payload = parseSubagentFinished(data);
+      if (payload) {
+        state.onSubagentFinished(payload, "completed");
+        scheduleRender();
+      }
+    });
+    events.on(SUBAGENT_FAILED_CHANNEL, (data) => {
+      const payload = parseSubagentFinished(data);
+      if (payload) {
+        state.onSubagentFinished(payload, "failed");
+        scheduleRender();
+      }
+    });
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     const loaded = await loadSidebarSettings(config);
     enabled = loaded.enabled;
@@ -93,6 +147,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     }
 
     state.onSessionStart(ctx);
+    await reloadTasks(ctx);
 
     if (clockTimer) clearInterval(clockTimer);
     clockTimer = setInterval(scheduleRender, CLOCK_INTERVAL_MS);
@@ -166,8 +221,10 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     scheduleRender();
   });
 
-  pi.on("tool_result", async (event) => {
+  pi.on("tool_result", async (event, ctx) => {
     state.onToolResult(event);
+    // After the tool ran, so pi-tasks's file already reflects the change.
+    if (TASK_TOOL_PATTERN.test(event.toolName ?? "")) await reloadTasks(ctx);
     scheduleRender();
   });
 
