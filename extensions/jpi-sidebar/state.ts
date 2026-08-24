@@ -1,4 +1,5 @@
 import { SUBAGENT_STALE_MS, type SubagentFinishedPayload, type SubagentStartedPayload } from "./subagents-bus.ts";
+import type { LiveSubagentStats } from "./subagents-registry.ts";
 
 const TODO_TOOL_PATTERN = /todo/i;
 // pi-tasks tool names (TaskCreate, TaskUpdate, ...) — gates the /todo/i
@@ -27,11 +28,15 @@ export interface SubagentEntry {
   name: string;
   type?: string;
   status: SubagentStatus;
+  /** pi-subagents' own status word (queued/running/steered/completed/stopped/error/aborted), from the live registry. */
+  rawStatus?: string;
   startedAt: number;
   completedAt?: number;
   toolUses?: number;
-  /** Total tokens from the bus's final stats; unset for heuristic entries. */
+  /** Total tokens — from the bus's final stats, or live from the registry while running. */
   tokens?: number;
+  cost?: number;
+  compactionCount?: number;
   durationMs?: number;
 }
 
@@ -191,6 +196,14 @@ export function extractSubagentName(input: unknown): string {
 
 function isHeuristicSubagentTool(toolName: string): boolean {
   return SUBAGENT_TOOL_EXACT.test(toolName) || SUBAGENT_TOOL_PREFIX.test(toolName);
+}
+
+/** pi-subagents' own status vocabulary, coarsened to what the glyph needs. Unrecognized words map to nothing. */
+function mapRawStatus(rawStatus: string): SubagentStatus | undefined {
+  if (rawStatus === "queued" || rawStatus === "running" || rawStatus === "steered") return "running";
+  if (rawStatus === "completed" || rawStatus === "stopped") return "completed";
+  if (rawStatus === "error" || rawStatus === "aborted") return "failed";
+  return undefined;
 }
 
 /**
@@ -454,6 +467,35 @@ export class SidebarState {
       tokens: payload.tokens?.total,
       durationMs: payload.durationMs,
     });
+  }
+
+  /**
+   * Applies one registry poll to a still-running entry. A terminal bus event
+   * always overwrites this regardless of poll timing (onSubagentFinished sets
+   * the entry unconditionally), so a stale or racing poll can't win.
+   * Returns whether anything actually changed, so index.ts can skip a render.
+   */
+  onSubagentLiveUpdate(id: string, stats: LiveSubagentStats): boolean {
+    const entry = this.subagents.get(id);
+    if (!entry || entry.status !== "running") return false;
+
+    const coarse = mapRawStatus(stats.rawStatus);
+    const changed =
+      entry.rawStatus !== stats.rawStatus ||
+      entry.toolUses !== stats.toolUses ||
+      entry.tokens !== stats.tokens ||
+      entry.cost !== stats.cost ||
+      entry.compactionCount !== stats.compactionCount ||
+      (coarse !== undefined && coarse !== entry.status);
+    if (!changed) return false;
+
+    entry.rawStatus = stats.rawStatus;
+    if (stats.toolUses !== undefined) entry.toolUses = stats.toolUses;
+    if (stats.tokens !== undefined) entry.tokens = stats.tokens;
+    if (stats.cost !== undefined) entry.cost = stats.cost;
+    if (stats.compactionCount !== undefined) entry.compactionCount = stats.compactionCount;
+    if (coarse !== undefined) entry.status = coarse;
+    return true;
   }
 
   /** Wholesale replacement from a pi-tasks file reload; see tasks.ts. */

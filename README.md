@@ -21,7 +21,11 @@ required.
   installed. Without it, falls back to a narrow tool-name heuristic (exactly
   `task`/`agent`, or a `dispatch*` prefix) that stands down the moment a real
   bus event is seen. A subagent with no terminal event for 30 minutes shows
-  as `lost`.
+  as `lost`. While a subagent is running, jpi-sidebar also polls
+  pi-subagents' cross-extension manager registry once a second for its live
+  status word (queued/running/steered), tool count, tokens, and cost, when
+  that registry is present — a completed/failed subagent's final stats always
+  come from the bus event, never from a poll.
 
 Both panels show an empty state when their package isn't installed — there's
 nothing to detect, so nothing renders as an error.

@@ -197,6 +197,68 @@ test("a running bus entry with no terminal event goes lost after 30 minutes", ()
   assert.equal(state.snapshot().subagents[0]!.status, "lost");
 });
 
+test("a live registry update maps pi-subagents' status vocabulary onto our coarse status", () => {
+  const state = new SidebarState();
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+
+  assert.equal(state.onSubagentLiveUpdate("agent-1", { rawStatus: "queued" }), true);
+  let entry = state.snapshot().subagents[0]!;
+  assert.equal(entry.status, "running");
+  assert.equal(entry.rawStatus, "queued");
+
+  assert.equal(state.onSubagentLiveUpdate("agent-1", { rawStatus: "steered" }), true);
+  assert.equal(state.snapshot().subagents[0]!.status, "running");
+
+  assert.equal(state.onSubagentLiveUpdate("agent-1", { rawStatus: "stopped" }), true);
+  entry = state.snapshot().subagents[0]!;
+  assert.equal(entry.status, "completed");
+  assert.equal(entry.rawStatus, "stopped");
+});
+
+test("a live registry update maps error/aborted to failed", () => {
+  const state = new SidebarState();
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+  state.onSubagentLiveUpdate("agent-1", { rawStatus: "aborted" });
+  assert.equal(state.snapshot().subagents[0]!.status, "failed");
+});
+
+test("a live registry update reports whether anything actually changed", () => {
+  const state = new SidebarState();
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+
+  const stats = { rawStatus: "running", toolUses: 2, tokens: 500, cost: 0.1, compactionCount: 0 };
+  assert.equal(state.onSubagentLiveUpdate("agent-1", stats), true);
+  // Same values again: nothing changed, no dirty flag, no unnecessary render.
+  assert.equal(state.onSubagentLiveUpdate("agent-1", { ...stats }), false);
+
+  assert.equal(state.onSubagentLiveUpdate("agent-1", { ...stats, toolUses: 3 }), true);
+
+  // An unknown id (heuristic entries, or a stale poll after the entry is gone) is a no-op.
+  assert.equal(state.onSubagentLiveUpdate("no-such-id", stats), false);
+});
+
+test("a terminal bus event wins over a stale poll: live updates stop applying once an entry is no longer running", () => {
+  const state = new SidebarState();
+  state.onSessionStart({});
+  state.onSubagentStarted({ id: "agent-1" });
+  state.onSubagentLiveUpdate("agent-1", { rawStatus: "running", toolUses: 2, tokens: 500 });
+
+  state.onSubagentFinished({ id: "agent-1", toolUses: 9, tokens: { input: 1, output: 1, total: 999 } }, "completed");
+  const finished = state.snapshot().subagents[0]!;
+  assert.equal(finished.toolUses, 9);
+  assert.equal(finished.tokens, 999);
+
+  // A poll landing after completion (race with the bus event) must not overwrite the final stats.
+  assert.equal(state.onSubagentLiveUpdate("agent-1", { rawStatus: "running", toolUses: 100, tokens: 1 }), false);
+  const stillFinished = state.snapshot().subagents[0]!;
+  assert.equal(stillFinished.toolUses, 9);
+  assert.equal(stillFinished.tokens, 999);
+  assert.equal(stillFinished.status, "completed");
+});
+
 test("active tool tracking starts and clears with execution events", () => {
   const clock = makeClock();
   const state = new SidebarState(clock.now);

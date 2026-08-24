@@ -12,11 +12,13 @@ import {
   SUBAGENT_READY_CHANNEL,
   SUBAGENT_STARTED_CHANNEL,
 } from "./subagents-bus.ts";
+import { getSubagentManager, readLiveStats } from "./subagents-registry.ts";
 import { loadTaskTodos } from "./tasks.ts";
 import type { ThemeLike } from "./theme.ts";
 
 const RENDER_DEBOUNCE_MS = 16;
 const CLOCK_INTERVAL_MS = 30_000;
+const SUBAGENT_POLL_INTERVAL_MS = 1_000;
 const MIN_WIDTH = 10;
 const MAX_WIDTH = 120;
 
@@ -46,6 +48,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
   let compositor: SidebarCompositor | null = null;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
   let clockTimer: ReturnType<typeof setInterval> | null = null;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
 
   const scheduleRender = () => {
     compositor?.invalidate();
@@ -108,6 +111,42 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     }
   };
 
+  const stopSubagentPolling = () => {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  };
+
+  // No change notification exists for live registry fields, so this is a
+  // poll; it self-stops the moment nothing is running rather than wait for
+  // session_shutdown, since a long-idle session shouldn't tick forever.
+  const pollRunningSubagents = () => {
+    const manager = getSubagentManager();
+    if (!manager) {
+      stopSubagentPolling();
+      return;
+    }
+    const running = state.snapshot().subagents.filter((entry) => entry.status === "running");
+    if (running.length === 0) {
+      stopSubagentPolling();
+      return;
+    }
+    let changed = false;
+    for (const entry of running) {
+      const stats = readLiveStats(manager, entry.id);
+      if (stats && state.onSubagentLiveUpdate(entry.id, stats)) changed = true;
+    }
+    if (changed) scheduleRender();
+  };
+
+  const ensureSubagentPolling = () => {
+    if (pollTimer || !getSubagentManager()) return;
+    const hasRunning = state.snapshot().subagents.some((entry) => entry.status === "running");
+    if (!hasRunning) return;
+    pollTimer = setInterval(pollRunningSubagents, SUBAGENT_POLL_INTERVAL_MS);
+  };
+
   // Subscribed once for the process's life, not per session: pi-subagents
   // fires subagents:ready on every session_start, and busActive is sticky.
   if (pi.events && typeof pi.events.on === "function") {
@@ -120,6 +159,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
       if (payload) {
         state.onSubagentStarted(payload);
         scheduleRender();
+        ensureSubagentPolling();
       }
     });
     events.on(SUBAGENT_COMPLETED_CHANNEL, (data) => {
@@ -184,6 +224,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
       clearTimeout(renderTimer);
       renderTimer = null;
     }
+    stopSubagentPolling();
     state.onSessionShutdown();
   });
 
@@ -219,6 +260,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
   pi.on("tool_call", async (event) => {
     state.onToolCall(event);
     scheduleRender();
+    ensureSubagentPolling();
   });
 
   pi.on("tool_result", async (event, ctx) => {

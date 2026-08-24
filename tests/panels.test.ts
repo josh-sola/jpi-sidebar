@@ -114,7 +114,8 @@ test("subagents panel reports an empty state", () => {
 test("subagents panel renders running, completed, failed, and lost blocks distinctly", () => {
   const running = renderSubagentsPanel(baseSnapshot({ subagents: [agent({ status: "running" })] }), 40, theme, 5000).join("\n");
   assert.match(running, /●.*Investigate bug/);
-  assert.match(running, /running \(5s\)/);
+  assert.match(running, /running/);
+  assert.match(running, /5s/);
 
   const completed = renderSubagentsPanel(
     baseSnapshot({
@@ -140,6 +141,36 @@ test("subagents panel renders running, completed, failed, and lost blocks distin
   const lost = renderSubagentsPanel(baseSnapshot({ subagents: [agent({ status: "lost" })] }), 40, theme, 5000).join("\n");
   assert.match(lost, /Investigate bug/);
   assert.match(lost, /lost/);
+});
+
+test("subagents panel shows a queued/steered raw status word and a live stats line with only present fields", () => {
+  const queued = renderSubagentsPanel(
+    baseSnapshot({ subagents: [agent({ status: "running", rawStatus: "queued" })] }),
+    40,
+    theme,
+    5000,
+  ).join("\n");
+  assert.match(queued, /queued/);
+  assert.doesNotMatch(queued, /\brunning\b/);
+
+  const live = renderSubagentsPanel(
+    baseSnapshot({
+      subagents: [agent({ status: "running", rawStatus: "running", toolUses: 2, tokens: 1500, cost: 0.4567 })],
+    }),
+    40,
+    theme,
+    5000,
+  ).join("\n");
+  assert.match(live, /2 tools · 2k tokens · \$0\.46 · 5s/);
+
+  const minimal = renderSubagentsPanel(
+    baseSnapshot({ subagents: [agent({ status: "running" })] }),
+    40,
+    theme,
+    5000,
+  ).join("\n");
+  assert.doesNotMatch(minimal, /tools|tokens|\$/);
+  assert.match(minimal, /5s/);
 });
 
 test("subagents panel shows the type next to the name, and blank-separates multiple agents", () => {
