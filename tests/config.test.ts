@@ -16,7 +16,14 @@ test("defaults are enabled with width 40 and linger 30 when jpi.kdl has no sideb
   const config = createSidebarConfig(env);
 
   const result = await loadSidebarSettings(config);
-  assert.deepEqual(result, { enabled: true, width: 40, linger: 30, path: config.path, issues: [] });
+  assert.deepEqual(result, {
+    enabled: true,
+    width: 40,
+    linger: 30,
+    position: "left",
+    path: config.path,
+    issues: [],
+  });
 });
 
 test("an existing stanza written before linger existed gets the default via the schema, not an issue", async () => {
@@ -86,6 +93,36 @@ test("a too-small width also falls back to the default", async () => {
   const result = await loadSidebarSettings(config);
   assert.equal(result.width, 40);
   assert.match(result.issues[0]!, /width 1 is out of range 10-120/);
+});
+
+test("position defaults to left and accepts right", async () => {
+  const env = await tempEnv();
+  const config = createSidebarConfig(env);
+  await writeFile(config.path, ["sidebar {", "  position right", "}"].join("\n"), "utf8");
+
+  const result = await loadSidebarSettings(config);
+  assert.equal(result.position, "right");
+  assert.deepEqual(result.issues, []);
+});
+
+test("position is case-insensitive", async () => {
+  const env = await tempEnv();
+  const config = createSidebarConfig(env);
+  await writeFile(config.path, ["sidebar {", "  position RIGHT", "}"].join("\n"), "utf8");
+
+  const result = await loadSidebarSettings(config);
+  assert.equal(result.position, "right");
+  assert.deepEqual(result.issues, []);
+});
+
+test("an invalid position falls back to the default and reports an issue", async () => {
+  const env = await tempEnv();
+  const config = createSidebarConfig(env);
+  await writeFile(config.path, ["sidebar {", "  position sideways", "}"].join("\n"), "utf8");
+
+  const result = await loadSidebarSettings(config);
+  assert.equal(result.position, "left");
+  assert.match(result.issues[0]!, /position "sideways" is not "left" or "right"/);
 });
 
 test("a saved width persists into jpi.kdl and is picked up by a fresh load", async () => {

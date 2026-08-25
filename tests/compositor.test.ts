@@ -4,7 +4,9 @@ import { test } from "vite-plus/test";
 import {
   computeAppWidth,
   isSidebarUsable,
+  shiftFrame,
   SidebarCompositor,
+  type SidebarPosition,
 } from "../extensions/jpi-sidebar/compositor.ts";
 
 // Mirrors the real terminal's shape: columns/write live on the prototype, not
@@ -45,6 +47,7 @@ function makeCompositor(
   mode = "fullscreen",
   width = 40,
   lines: string[] = ["line1", "line2"],
+  position: SidebarPosition = "right",
 ) {
   const tui = {
     mode,
@@ -52,6 +55,7 @@ function makeCompositor(
   };
   const compositor = new SidebarCompositor(tui, {
     getWidth: () => width,
+    getPosition: () => position,
     renderBand: () => lines,
   });
   return { tui, compositor };
@@ -98,7 +102,11 @@ test("the narrowed width tracks getWidth() live, without reinstalling", () => {
     mode: "fullscreen",
     terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number },
   };
-  const compositor = new SidebarCompositor(tui, { getWidth: () => width, renderBand: () => [] });
+  const compositor = new SidebarCompositor(tui, {
+    getWidth: () => width,
+    getPosition: () => "right",
+    renderBand: () => [],
+  });
   compositor.install();
   assert.equal(terminal.columns, 59);
   width = 50;
@@ -152,6 +160,7 @@ test("the band is cached across writes until invalidate() is called", () => {
   let renderCount = 0;
   const compositor = new SidebarCompositor(tui, {
     getWidth: () => 40,
+    getPosition: () => "right",
     renderBand: () => {
       renderCount += 1;
       return lines;
@@ -179,6 +188,7 @@ test("a resize (rows or columns changed) forces a re-render even without invalid
   let renderCount = 0;
   const compositor = new SidebarCompositor(tui, {
     getWidth: () => 40,
+    getPosition: () => "right",
     renderBand: () => {
       renderCount += 1;
       return ["x"];
@@ -260,4 +270,83 @@ test("the getter and paint() flip together when the raw width crosses the minimu
   assert.equal(terminal.columns, 20);
   terminal.write("\x1b[?2026hframe\x1b[?2026l");
   assert.ok(terminal.writes.at(-1)!.length > "\x1b[?2026hframe\x1b[?2026l".length);
+});
+
+test("left mode: paint() puts the band at column 1 and the separator at width + 1", () => {
+  const terminal = new FakeTerminal(100, 24);
+  const { compositor } = makeCompositor(terminal, "fullscreen", 40, ["hello", "world"], "left");
+  compositor.install();
+
+  terminal.write("\x1b[?2026hframe\x1b[?2026l");
+  const painted = terminal.writes.at(-1)!;
+
+  assert.ok(painted.includes(`${moveTo(1, 41)}\x1b[2m│`));
+  assert.ok(painted.includes(moveTo(1, 1)));
+  assert.ok(painted.includes(moveTo(24, 41)));
+  assert.ok(painted.includes(moveTo(24, 1)));
+  assert.ok(painted.includes("hello"));
+  assert.ok(painted.includes("world"));
+});
+
+test("shiftFrame moves a CUP with an explicit row and column", () => {
+  const input = "\x1b[5;1H\x1b[2Kcontent";
+  assert.equal(shiftFrame(input, 41), "\x1b[5;42H\x1b[0Kcontent");
+});
+
+test("shiftFrame shifts a CUP whose column is not 1", () => {
+  assert.equal(shiftFrame("\x1b[3;10H", 41), "\x1b[3;51H");
+});
+
+test("shiftFrame treats a bare \\x1b[H as row 1, column 1", () => {
+  assert.equal(shiftFrame("\x1b[H", 41), "\x1b[1;42H");
+});
+
+test("shiftFrame treats \\x1b[3H as row 3, implicit column 1", () => {
+  assert.equal(shiftFrame("\x1b[3H", 41), "\x1b[3;42H");
+});
+
+test("shiftFrame leaves a full-screen clear (\\x1b[2J) alone", () => {
+  const input = "\x1b[2J\x1b[1;1H\x1b[2Kcontent";
+  const shifted = shiftFrame(input, 41);
+  assert.ok(shifted.startsWith("\x1b[2J"));
+  assert.equal(shifted, "\x1b[2J\x1b[1;42H\x1b[0Kcontent");
+});
+
+test("left-mode install transforms every frame and appends the band; a plain write passes through", () => {
+  const terminal = new FakeTerminal(100, 24);
+  const { compositor } = makeCompositor(terminal, "fullscreen", 40, ["band"], "left");
+  compositor.install();
+
+  terminal.write("no sync bracket here");
+  assert.equal(terminal.writes.at(-1), "no sync bracket here");
+
+  terminal.write("\x1b[?2026h\x1b[1;1H\x1b[2Kcontent\x1b[?2026l");
+  const painted = terminal.writes.at(-1)!;
+  // The app's own row-1 CUP is pushed right by width + 1 (41), and its EL2
+  // becomes EL0 so it doesn't erase the band.
+  assert.ok(painted.includes("\x1b[1;42H\x1b[0Kcontent"));
+  assert.ok(painted.includes("band"));
+});
+
+test("left-mode install passes an alt-screen exit write through without shifting it", () => {
+  const terminal = new FakeTerminal(100, 24);
+  const { compositor } = makeCompositor(terminal, "fullscreen", 40, ["band"], "left");
+  compositor.install();
+
+  const exitWrite = "\x1b[?2026h\x1b[?1049l\x1b[1;1H\x1b[2Kdone\x1b[?2026l";
+  terminal.write(exitWrite);
+  const painted = terminal.writes.at(-1)!;
+  // Unshifted: the row-1 CUP and EL2 stay exactly as pi wrote them.
+  assert.ok(painted.startsWith(exitWrite));
+});
+
+test("right-mode install writes stay byte-identical to a plain paint append (no shifting)", () => {
+  const terminal = new FakeTerminal(100, 24);
+  const { compositor } = makeCompositor(terminal, "fullscreen", 40, ["band"], "right");
+  compositor.install();
+
+  const frame = "\x1b[?2026h\x1b[1;1H\x1b[2Kcontent\x1b[?2026l";
+  terminal.write(frame);
+  const painted = terminal.writes.at(-1)!;
+  assert.ok(painted.startsWith(frame));
 });

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { type CompositorTerminal, SidebarCompositor } from "./compositor.ts";
-import { createSidebarConfig, loadSidebarSettings } from "./config.ts";
+import { createSidebarConfig, loadSidebarSettings, type SidebarPosition } from "./config.ts";
 import { renderSidebar } from "./sidebar.ts";
 import { TASK_TOOL_PATTERN, SidebarState } from "./state.ts";
 import {
@@ -46,6 +46,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
 
   let enabled = true;
   let width = 40;
+  let position: SidebarPosition = "left";
   let lingerSeconds = 30;
   let tui: WidgetTui | null = null;
   let theme: ThemeLike | null = null;
@@ -74,24 +75,35 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     const activeTheme = theme;
     const instance = new SidebarCompositor(tui, {
       getWidth: () => width,
+      getPosition: () => position,
       renderBand: (bandWidth) => renderSidebar(state.snapshot(), bandWidth, activeTheme),
     });
     if (instance.install()) compositor = instance;
   };
 
   const applyOverride = async (
-    override: { enabled?: boolean; width?: number },
+    override: { enabled?: boolean; width?: number; position?: SidebarPosition },
     ctx: NotifyContext,
   ): Promise<boolean> => {
     if (override.enabled !== undefined) enabled = override.enabled;
     if (override.width !== undefined) width = override.width;
+    if (override.position !== undefined) position = override.position;
 
     if (!enabled) {
       teardownCompositor();
     } else {
       installCompositor();
     }
-    scheduleRender();
+
+    if (override.position !== undefined && enabled && compositor) {
+      // pi only full-redraws when its reported size changes; a position flip
+      // keeps the width, so force a full redraw or stale content stays at
+      // the old offset.
+      compositor.invalidate();
+      tui?.requestRender(true);
+    } else {
+      scheduleRender();
+    }
 
     // The runtime change above already took effect; a persistence failure
     // must not roll it back, only warn that it won't survive a restart.
@@ -211,6 +223,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     const loaded = await loadSidebarSettings(config);
     enabled = loaded.enabled;
     width = loaded.width;
+    position = loaded.position;
     lingerSeconds = loaded.linger;
     state.setLingerSeconds(lingerSeconds);
     if (loaded.issues.length > 0) {
@@ -329,7 +342,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("sidebar", {
-    description: "Control the sidebar: /sidebar on | off | width <N>",
+    description: "Control the sidebar: /sidebar on | off | width <N> | position <left|right>",
     handler: async (args, ctx) => {
       const [action, value] = args.trim().split(/\s+/).filter(Boolean);
 
@@ -359,7 +372,18 @@ export default function jpiSidebar(pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.notify("Usage: /sidebar on | off | width <N>", "warning");
+      if (action === "position") {
+        const normalized = value?.toLowerCase();
+        if (normalized === "left" || normalized === "right") {
+          await applyOverride({ position: normalized }, ctx);
+          ctx.ui.notify(`jpi-sidebar position set to ${normalized}.`, "info");
+          return;
+        }
+        ctx.ui.notify("Usage: /sidebar position <left|right>", "warning");
+        return;
+      }
+
+      ctx.ui.notify("Usage: /sidebar on | off | width <N> | position <left|right>", "warning");
     },
   });
 

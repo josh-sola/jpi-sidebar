@@ -6,6 +6,7 @@ const DEFAULT_WIDTH = 40;
 const MIN_LINGER_SECONDS = 0;
 const MAX_LINGER_SECONDS = 600;
 const DEFAULT_LINGER_SECONDS = 30;
+const DEFAULT_POSITION = "left";
 
 const sidebarSchema = j.node({
   fields: {
@@ -15,6 +16,10 @@ const sidebarSchema = j.node({
       .number()
       .default(DEFAULT_LINGER_SECONDS)
       .describe("seconds a finished todo or subagent stays visible, 0-600"),
+    position: j
+      .string()
+      .default(DEFAULT_POSITION)
+      .describe("which edge the sidebar sits on: left or right"),
   },
 });
 
@@ -27,10 +32,13 @@ export function createSidebarConfig(
   return new Config("sidebar", sidebarSchema, env, homeDirectory);
 }
 
+export type SidebarPosition = "left" | "right";
+
 export interface SidebarSettings {
   enabled: boolean;
   width: number;
   linger: number;
+  position: SidebarPosition;
 }
 
 export interface LoadedSidebarSettings extends SidebarSettings {
@@ -58,6 +66,15 @@ function sanitizeLinger(value: number, issues: string[]): number {
   return value;
 }
 
+function sanitizePosition(value: string, issues: string[]): SidebarPosition {
+  const normalized = value.toLowerCase();
+  if (normalized === "left" || normalized === "right") return normalized;
+  issues.push(
+    `position "${value}" is not "left" or "right"; using the default ${DEFAULT_POSITION}`,
+  );
+  return DEFAULT_POSITION;
+}
+
 export async function loadSidebarSettings(
   config: Config<SidebarSchema>,
 ): Promise<LoadedSidebarSettings> {
@@ -65,5 +82,13 @@ export async function loadSidebarSettings(
   const collectedIssues = [...issues];
   const width = sanitizeWidth(value.width, collectedIssues);
   const linger = sanitizeLinger(value.linger, collectedIssues);
-  return { enabled: value.enabled, width, linger, path: config.path, issues: collectedIssues };
+  const position = sanitizePosition(value.position, collectedIssues);
+  return {
+    enabled: value.enabled,
+    width,
+    linger,
+    position,
+    path: config.path,
+    issues: collectedIssues,
+  };
 }
