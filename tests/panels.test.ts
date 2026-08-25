@@ -91,6 +91,14 @@ test("todos panel reports an empty state and renders each status glyph", () => {
   assert.match(lines[2]!, /^○ queued$/);
 });
 
+test("todos panel returns no lines when every todo is completed", () => {
+  const todos: TodoItem[] = [
+    { id: "1", content: "done thing", status: "completed" },
+    { id: "2", content: "also done", status: "completed" },
+  ];
+  assert.deepEqual(renderTodosPanel(baseSnapshot({ todos }), 40, theme), []);
+});
+
 test("todos panel truncates long content to fit the given width", () => {
   const todos: TodoItem[] = [{ id: "1", content: "y".repeat(100), status: "pending" }];
   const lines = renderTodosPanel(baseSnapshot({ todos }), 10, theme);
@@ -215,4 +223,14 @@ test("renderSidebar composes panels with headers, separators, and blank-line spa
   assert.ok(lines.some((line) => line === "** Subagents (0/0)**"));
   assert.ok(lines.includes(""));
   assert.ok(lines.every((line) => line.length <= 30));
+});
+
+test("renderSidebar omits the Todos header when every todo is completed", () => {
+  const snapshot = baseSnapshot({
+    sessionTitle: "Working on the sidebar",
+    todos: [{ id: "1", content: "one", status: "completed" }],
+  });
+  const lines = renderSidebar(snapshot, 30, theme);
+
+  assert.ok(lines.every((line) => !line.includes("Todos")));
 });

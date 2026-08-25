@@ -26,5 +26,6 @@ export function renderTodosPanel(
   theme: ThemeLike,
 ): string[] {
   if (state.todos.length === 0) return [theme.fg("dim", "  (no todos)")];
+  if (state.todos.every((todo) => todo.status === "completed")) return [];
   return state.todos.map((todo) => renderTodoLine(todo, width, theme));
 }
