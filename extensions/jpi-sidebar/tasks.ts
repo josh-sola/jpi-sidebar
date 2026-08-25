@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 
-import { getAgentDirectory } from "jpi-base";
+import { getAgentDirectory, projectSlug } from "jpi-base";
 
 import type { TodoItem, TodoStatus } from "./state.ts";
 
@@ -13,14 +13,6 @@ interface RawTask {
   status?: unknown;
 }
 
-// Mirrors @tintinweb/pi-tasks's task-paths.ts projectKey(), so a session-global
-// file resolves to the same path pi-tasks itself wrote it to.
-function projectKey(cwd: string): string {
-  return `--${resolve(cwd)
-    .replace(/^[/\\]/, "")
-    .replace(/[/\\:]/g, "-")}--`;
-}
-
 function candidatePaths(
   cwd: string,
   sessionId: string,
@@ -28,10 +20,11 @@ function candidatePaths(
   homeDirectory?: string,
 ): string[] {
   const agentDirectory = getAgentDirectory(env, homeDirectory);
+  const projectDirectory = join(agentDirectory, "jpi", "tasks", projectSlug(cwd));
+  const sanitizedSessionId = sessionId.replace(/[^A-Za-z0-9._-]/g, "-");
   return [
-    join(cwd, ".pi", "tasks", `tasks-${sessionId}.json`),
-    join(agentDirectory, "tasks", "sessions", projectKey(cwd), `tasks-${sessionId}.json`),
-    join(cwd, ".pi", "tasks", "tasks.json"),
+    join(projectDirectory, `session-${sanitizedSessionId}.json`),
+    join(projectDirectory, "project.json"),
   ];
 }
 

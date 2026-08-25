@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vite-plus/test";
 
+import { projectSlug } from "jpi-base";
+
 import { loadTaskTodos } from "../extensions/jpi-sidebar/tasks.ts";
 
 async function tempCwd() {
@@ -15,16 +17,32 @@ async function tempAgentEnv() {
   return { PI_CODING_AGENT_DIR: directory };
 }
 
-async function writeSessionTasks(cwd: string, sessionId: string, data: unknown) {
-  const dir = join(cwd, ".pi", "tasks");
+async function taskDir(agentDirectory: string, cwd: string) {
+  const dir = join(agentDirectory, "jpi", "tasks", projectSlug(cwd));
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, `tasks-${sessionId}.json`), JSON.stringify(data), "utf8");
+  return dir;
 }
 
-test("maps subject and status from the workspace-session task file, preserving order", async () => {
+async function writeSessionTasks(
+  agentDirectory: string,
+  cwd: string,
+  sessionId: string,
+  data: unknown,
+) {
+  const dir = await taskDir(agentDirectory, cwd);
+  const sanitizedSessionId = sessionId.replace(/[^A-Za-z0-9._-]/g, "-");
+  await writeFile(join(dir, `session-${sanitizedSessionId}.json`), JSON.stringify(data), "utf8");
+}
+
+async function writeProjectTasks(agentDirectory: string, cwd: string, data: unknown) {
+  const dir = await taskDir(agentDirectory, cwd);
+  await writeFile(join(dir, "project.json"), JSON.stringify(data), "utf8");
+}
+
+test("maps subject and status from the session task file, preserving order", async () => {
   const cwd = await tempCwd();
   const env = await tempAgentEnv();
-  await writeSessionTasks(cwd, "sess-1", {
+  await writeSessionTasks(env.PI_CODING_AGENT_DIR, cwd, "sess-1", {
     nextId: 3,
     tasks: [
       { id: "1", subject: "Write tests", status: "in_progress" },
@@ -42,7 +60,7 @@ test("maps subject and status from the workspace-session task file, preserving o
 test("falls back to activeForm then description when subject is missing", async () => {
   const cwd = await tempCwd();
   const env = await tempAgentEnv();
-  await writeSessionTasks(cwd, "sess-1", {
+  await writeSessionTasks(env.PI_CODING_AGENT_DIR, cwd, "sess-1", {
     nextId: 3,
     tasks: [
       { id: "1", activeForm: "Writing tests", status: "pending" },
@@ -66,28 +84,50 @@ test("returns undefined (keep the previous list) when no candidate file exists",
 test("survives a corrupt task file by returning undefined instead of throwing", async () => {
   const cwd = await tempCwd();
   const env = await tempAgentEnv();
-  const dir = join(cwd, ".pi", "tasks");
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "tasks-sess-1.json"), "{not valid json", "utf8");
+  const dir = await taskDir(env.PI_CODING_AGENT_DIR, cwd);
+  await writeFile(join(dir, "session-sess-1.json"), "{not valid json", "utf8");
 
   const todos = await loadTaskTodos(cwd, "sess-1", env);
   assert.equal(todos, undefined);
 });
 
-test("falls back to the shared workspace board when no session-scoped file exists", async () => {
+test("falls back to the project file when no session-scoped file exists", async () => {
   const cwd = await tempCwd();
   const env = await tempAgentEnv();
-  const dir = join(cwd, ".pi", "tasks");
-  await mkdir(dir, { recursive: true });
-  await writeFile(
-    join(dir, "tasks.json"),
-    JSON.stringify({
-      nextId: 2,
-      tasks: [{ id: "1", subject: "Shared board task", status: "completed" }],
-    }),
-    "utf8",
-  );
+  await writeProjectTasks(env.PI_CODING_AGENT_DIR, cwd, {
+    nextId: 2,
+    tasks: [{ id: "1", subject: "Shared board task", status: "completed" }],
+  });
 
   const todos = await loadTaskTodos(cwd, "sess-1", env);
   assert.deepEqual(todos, [{ id: "1", content: "Shared board task", status: "completed" }]);
+});
+
+test("prefers the session file over the project file when the session file is newer", async () => {
+  const cwd = await tempCwd();
+  const env = await tempAgentEnv();
+  await writeProjectTasks(env.PI_CODING_AGENT_DIR, cwd, {
+    nextId: 2,
+    tasks: [{ id: "1", subject: "Project task", status: "pending" }],
+  });
+  await writeSessionTasks(env.PI_CODING_AGENT_DIR, cwd, "sess-1", {
+    nextId: 2,
+    tasks: [{ id: "1", subject: "Session task", status: "in_progress" }],
+  });
+
+  const todos = await loadTaskTodos(cwd, "sess-1", env);
+  assert.deepEqual(todos, [{ id: "1", content: "Session task", status: "in_progress" }]);
+});
+
+test("sanitizes an unsafe session id before building the session path", async () => {
+  const cwd = await tempCwd();
+  const env = await tempAgentEnv();
+  const sessionId = "sess/weird:id 1";
+  await writeSessionTasks(env.PI_CODING_AGENT_DIR, cwd, sessionId, {
+    nextId: 2,
+    tasks: [{ id: "1", subject: "Sanitized session task", status: "pending" }],
+  });
+
+  const todos = await loadTaskTodos(cwd, sessionId, env);
+  assert.deepEqual(todos, [{ id: "1", content: "Sanitized session task", status: "pending" }]);
 });
