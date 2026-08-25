@@ -17,7 +17,9 @@ import { loadTaskTodos } from "./tasks.ts";
 import type { ThemeLike } from "./theme.ts";
 
 const RENDER_DEBOUNCE_MS = 16;
-const CLOCK_INTERVAL_MS = 30_000;
+// pi only writes frames when its own content changes, so between events the
+// band's clock and elapsed times freeze; this tick keeps them moving.
+const TICK_INTERVAL_MS = 1_000;
 const SUBAGENT_POLL_INTERVAL_MS = 1_000;
 // Fires just after an item's linger window closes, so eviction (checked
 // lazily in snapshot()) has already happened by the time this paints.
@@ -51,7 +53,7 @@ export default function jpiSidebar(pi: ExtensionAPI) {
   let theme: ThemeLike | null = null;
   let compositor: SidebarCompositor | null = null;
   let renderTimer: ReturnType<typeof setTimeout> | null = null;
-  let clockTimer: ReturnType<typeof setInterval> | null = null;
+  let tickTimer: ReturnType<typeof setInterval> | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let lingerTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -223,8 +225,10 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     state.onSessionStart(ctx);
     await reloadTasks(ctx);
 
-    if (clockTimer) clearInterval(clockTimer);
-    clockTimer = setInterval(scheduleRender, CLOCK_INTERVAL_MS);
+    if (tickTimer) clearInterval(tickTimer);
+    tickTimer = setInterval(() => {
+      if (compositor) scheduleRender();
+    }, TICK_INTERVAL_MS);
 
     if (!ctx.hasUI) return;
 
@@ -250,9 +254,9 @@ export default function jpiSidebar(pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
-    if (clockTimer) {
-      clearInterval(clockTimer);
-      clockTimer = null;
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = null;
     }
     if (renderTimer) {
       clearTimeout(renderTimer);
