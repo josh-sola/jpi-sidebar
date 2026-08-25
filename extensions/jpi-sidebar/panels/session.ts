@@ -21,12 +21,18 @@ export function renderSessionPanel(
     const elapsed = now - state.activeTool.startedAt;
     const toolName = truncate(state.activeTool.name, Math.max(0, width - 14));
     lines.push(
-      theme.fg("dim", "  tool  ") + theme.fg("accent", toolName) + theme.fg("dim", ` (${formatDuration(elapsed)})`),
+      theme.fg("dim", "  tool  ") +
+        theme.fg("accent", toolName) +
+        theme.fg("dim", ` (${formatDuration(elapsed)})`),
     );
   }
 
-  const modelText = state.modelName ? truncate(state.modelName, Math.max(0, width - 9)) : NOT_AVAILABLE;
-  lines.push(theme.fg("dim", "  model ") + theme.fg(state.modelName ? "accent" : "muted", modelText));
+  const modelText = state.modelName
+    ? truncate(state.modelName, Math.max(0, width - 9))
+    : NOT_AVAILABLE;
+  lines.push(
+    theme.fg("dim", "  model ") + theme.fg(state.modelName ? "accent" : "muted", modelText),
+  );
 
   if (state.contextPercent !== null) {
     const percent = Math.round(state.contextPercent);
@@ -34,7 +40,9 @@ export function renderSessionPanel(
     const windowSize = state.contextWindow !== null ? formatCount(state.contextWindow) : "?";
     const color = percent > 90 ? "warning" : percent > 70 ? "accent" : "text";
     lines.push(
-      theme.fg("dim", "  ctx   ") + theme.fg(color, `${tokens} / ${windowSize}`) + theme.fg("dim", ` (${percent}%)`),
+      theme.fg("dim", "  ctx   ") +
+        theme.fg(color, `${tokens} / ${windowSize}`) +
+        theme.fg("dim", ` (${percent}%)`),
     );
   } else {
     lines.push(theme.fg("dim", "  ctx   ") + theme.fg("muted", NOT_AVAILABLE));

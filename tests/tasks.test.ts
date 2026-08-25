@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import { loadTaskTodos } from "../extensions/jpi-sidebar/tasks.ts";
 
@@ -81,7 +81,10 @@ test("falls back to the shared workspace board when no session-scoped file exist
   await mkdir(dir, { recursive: true });
   await writeFile(
     join(dir, "tasks.json"),
-    JSON.stringify({ nextId: 2, tasks: [{ id: "1", subject: "Shared board task", status: "completed" }] }),
+    JSON.stringify({
+      nextId: 2,
+      tasks: [{ id: "1", subject: "Shared board task", status: "completed" }],
+    }),
     "utf8",
   );
 

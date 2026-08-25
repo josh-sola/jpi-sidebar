@@ -112,10 +112,13 @@ export default function jpiSidebar(pi: ExtensionAPI) {
   // is covered by the first timer's repaint too, since it fires no earlier.
   const armLingerRepaint = () => {
     if (lingerTimer) return;
-    lingerTimer = setTimeout(() => {
-      lingerTimer = null;
-      scheduleRender();
-    }, lingerSeconds * 1000 + LINGER_REPAINT_BUFFER_MS);
+    lingerTimer = setTimeout(
+      () => {
+        lingerTimer = null;
+        scheduleRender();
+      },
+      lingerSeconds * 1000 + LINGER_REPAINT_BUFFER_MS,
+    );
   };
 
   // pi-tasks broadcasts nothing, so the todo list is only ever as fresh as
@@ -211,7 +214,10 @@ export default function jpiSidebar(pi: ExtensionAPI) {
     lingerSeconds = loaded.linger;
     state.setLingerSeconds(lingerSeconds);
     if (loaded.issues.length > 0) {
-      ctx.ui.notify(`jpi-sidebar config at ${loaded.path} has issues: ${loaded.issues.join("; ")}.`, "warning");
+      ctx.ui.notify(
+        `jpi-sidebar config at ${loaded.path} has issues: ${loaded.issues.join("; ")}.`,
+        "warning",
+      );
     }
 
     state.onSessionStart(ctx);
@@ -334,7 +340,10 @@ export default function jpiSidebar(pi: ExtensionAPI) {
         } else if (active) {
           ctx.ui.notify("jpi-sidebar enabled.", "info");
         } else {
-          ctx.ui.notify("jpi-sidebar needs pi's fullscreen renderer (start with --tui-mode fullscreen).", "warning");
+          ctx.ui.notify(
+            "jpi-sidebar needs pi's fullscreen renderer (start with --tui-mode fullscreen).",
+            "warning",
+          );
         }
         return;
       }
@@ -364,7 +373,10 @@ export default function jpiSidebar(pi: ExtensionAPI) {
       } else if (active) {
         ctx.ui.notify("jpi-sidebar enabled.", "info");
       } else {
-        ctx.ui.notify("jpi-sidebar needs pi's fullscreen renderer (start with --tui-mode fullscreen).", "warning");
+        ctx.ui.notify(
+          "jpi-sidebar needs pi's fullscreen renderer (start with --tui-mode fullscreen).",
+          "warning",
+        );
       }
     },
   });

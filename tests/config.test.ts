@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import { createSidebarConfig, loadSidebarSettings } from "../extensions/jpi-sidebar/config.ts";
 
@@ -22,7 +22,11 @@ test("defaults are enabled with width 40 and linger 30 when jpi.kdl has no sideb
 test("an existing stanza written before linger existed gets the default via the schema, not an issue", async () => {
   const env = await tempEnv();
   const config = createSidebarConfig(env);
-  await writeFile(config.path, ["sidebar {", "  enabled #true", "  width 55", "}"].join("\n"), "utf8");
+  await writeFile(
+    config.path,
+    ["sidebar {", "  enabled #true", "  width 55", "}"].join("\n"),
+    "utf8",
+  );
 
   const result = await loadSidebarSettings(config);
   assert.equal(result.linger, 30);
@@ -63,7 +67,11 @@ test("linger 0 is in range and is not clamped away", async () => {
 test("an out-of-range width falls back to the default and reports an issue", async () => {
   const env = await tempEnv();
   const config = createSidebarConfig(env);
-  await writeFile(config.path, ["sidebar {", "  enabled #true", "  width 500", "}"].join("\n"), "utf8");
+  await writeFile(
+    config.path,
+    ["sidebar {", "  enabled #true", "  width 500", "}"].join("\n"),
+    "utf8",
+  );
 
   const result = await loadSidebarSettings(config);
   assert.equal(result.width, 40);

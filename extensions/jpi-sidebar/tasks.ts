@@ -16,10 +16,17 @@ interface RawTask {
 // Mirrors @tintinweb/pi-tasks's task-paths.ts projectKey(), so a session-global
 // file resolves to the same path pi-tasks itself wrote it to.
 function projectKey(cwd: string): string {
-  return `--${resolve(cwd).replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+  return `--${resolve(cwd)
+    .replace(/^[/\\]/, "")
+    .replace(/[/\\:]/g, "-")}--`;
 }
 
-function candidatePaths(cwd: string, sessionId: string, env?: NodeJS.ProcessEnv, homeDirectory?: string): string[] {
+function candidatePaths(
+  cwd: string,
+  sessionId: string,
+  env?: NodeJS.ProcessEnv,
+  homeDirectory?: string,
+): string[] {
   const agentDirectory = getAgentDirectory(env, homeDirectory);
   return [
     join(cwd, ".pi", "tasks", `tasks-${sessionId}.json`),
@@ -39,7 +46,9 @@ async function newestExisting(paths: string[]): Promise<string | undefined> {
       }
     }),
   );
-  const existing = stats.filter((entry): entry is { path: string; mtimeMs: number } => entry !== undefined);
+  const existing = stats.filter(
+    (entry): entry is { path: string; mtimeMs: number } => entry !== undefined,
+  );
   if (existing.length === 0) return undefined;
   return existing.reduce((newest, entry) => (entry.mtimeMs > newest.mtimeMs ? entry : newest)).path;
 }

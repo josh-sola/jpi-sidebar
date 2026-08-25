@@ -1,23 +1,31 @@
 {
   "name": "jpi-sidebar",
   "version": "0.4.0",
+  "keywords": [
+    "pi-package"
+  ],
   "type": "module",
-  "keywords": ["pi-package"],
   "scripts": {
-    "test": "node --test tests/*.test.ts"
+    "test": "vp test"
   },
   "dependencies": {
     "jpi-base": "github:josh-sola/jpi-base#semver:^0.3.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.84.0",
+    "@earendil-works/pi-tui": ">=0.84.0",
+    "vite-plus": "0.3.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.84.0",
     "@earendil-works/pi-tui": ">=0.84.0"
   },
-  "devDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.84.0",
-    "@earendil-works/pi-tui": ">=0.84.0"
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0"
   },
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": [
+      "./extensions"
+    ]
   }
 }

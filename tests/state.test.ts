@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import { extractSubagentName, parseTodos, SidebarState } from "../extensions/jpi-sidebar/state.ts";
 import { SUBAGENT_STALE_MS } from "../extensions/jpi-sidebar/subagents-bus.ts";
@@ -15,7 +15,11 @@ function makeClock(start = 0) {
   };
 }
 
-function usage(input: number, output: number, extra: Partial<{ cacheRead: number; cacheWrite: number; cost: number }> = {}) {
+function usage(
+  input: number,
+  output: number,
+  extra: Partial<{ cacheRead: number; cacheWrite: number; cost: number }> = {},
+) {
   return {
     input,
     output,
@@ -43,12 +47,27 @@ test("session_start seeds totals and title from a resumed branch, skipping error
   state.onSessionStart({
     sessionManager: {
       getBranch: () => [
-        { type: "message", message: { role: "user", content: "  Fix the flaky test\nmore detail" } },
+        {
+          type: "message",
+          message: { role: "user", content: "  Fix the flaky test\nmore detail" },
+        },
         { type: "message", message: { role: "assistant", usage: usage(10, 20, { cost: 0.01 }) } },
         { type: "message", message: { role: "user", content: "second prompt" } },
-        { type: "message", message: { role: "assistant", stopReason: "error", usage: usage(100, 100) } },
-        { type: "message", message: { role: "assistant", stopReason: "aborted", usage: usage(100, 100) } },
-        { type: "message", message: { role: "assistant", usage: usage(5, 15, { cacheRead: 3, cacheWrite: 2, cost: 0.02 }) } },
+        {
+          type: "message",
+          message: { role: "assistant", stopReason: "error", usage: usage(100, 100) },
+        },
+        {
+          type: "message",
+          message: { role: "assistant", stopReason: "aborted", usage: usage(100, 100) },
+        },
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: usage(5, 15, { cacheRead: 3, cacheWrite: 2, cost: 0.02 }),
+          },
+        },
         { type: "thinking_level_change" },
       ],
     },
@@ -99,18 +118,29 @@ test("todo tool calls replace the todo list on valid shapes and are ignored on i
   const state = new SidebarState();
   state.onSessionStart({});
 
-  state.onToolCall({ toolName: "todo_write", input: { todos: [{ content: "write tests", status: "in_progress" }] } });
-  assert.deepEqual(state.snapshot().todos, [{ id: "0", content: "write tests", status: "in_progress" }]);
+  state.onToolCall({
+    toolName: "todo_write",
+    input: { todos: [{ content: "write tests", status: "in_progress" }] },
+  });
+  assert.deepEqual(state.snapshot().todos, [
+    { id: "0", content: "write tests", status: "in_progress" },
+  ]);
 
   state.onToolCall({ toolName: "todo_write", input: "not an object" });
-  assert.deepEqual(state.snapshot().todos, [{ id: "0", content: "write tests", status: "in_progress" }]);
+  assert.deepEqual(state.snapshot().todos, [
+    { id: "0", content: "write tests", status: "in_progress" },
+  ]);
 });
 
 test("the heuristic detects an exact agent tool name and closes it on tool_result, when the bus is inactive", () => {
   const state = new SidebarState();
   state.onSessionStart({});
 
-  state.onToolCall({ toolName: "agent", toolCallId: "call-1", input: { description: "Refactor the parser\nmore" } });
+  state.onToolCall({
+    toolName: "agent",
+    toolCallId: "call-1",
+    input: { description: "Refactor the parser\nmore" },
+  });
   let snapshot = state.snapshot();
   assert.equal(snapshot.subagents.length, 1);
   assert.equal(snapshot.subagents[0]!.name, "Refactor the parser");
@@ -129,7 +159,11 @@ test("the heuristic detects an exact agent tool name and closes it on tool_resul
 test("a failed heuristic tool_result is marked failed, and a dispatch* prefix also matches", () => {
   const state = new SidebarState();
   state.onSessionStart({});
-  state.onToolCall({ toolName: "dispatch_agent", toolCallId: "call-1", input: { name: "Investigate bug" } });
+  state.onToolCall({
+    toolName: "dispatch_agent",
+    toolCallId: "call-1",
+    input: { name: "Investigate bug" },
+  });
   state.onToolResult({ toolCallId: "call-1", isError: true });
   assert.equal(state.snapshot().subagents[0]!.status, "failed");
 });
@@ -137,7 +171,11 @@ test("a failed heuristic tool_result is marked failed, and a dispatch* prefix al
 test("the heuristic does not match pi-tasks tool names like TaskCreate", () => {
   const state = new SidebarState();
   state.onSessionStart({});
-  state.onToolCall({ toolName: "TaskCreate", toolCallId: "call-1", input: { subject: "write tests" } });
+  state.onToolCall({
+    toolName: "TaskCreate",
+    toolCallId: "call-1",
+    input: { subject: "write tests" },
+  });
   assert.deepEqual(state.snapshot().subagents, []);
 });
 
@@ -250,13 +288,19 @@ test("a terminal bus event wins over a stale poll: live updates stop applying on
   state.onSubagentStarted({ id: "agent-1" });
   state.onSubagentLiveUpdate("agent-1", { rawStatus: "running", toolUses: 2, tokens: 500 });
 
-  state.onSubagentFinished({ id: "agent-1", toolUses: 9, tokens: { input: 1, output: 1, total: 999 } }, "completed");
+  state.onSubagentFinished(
+    { id: "agent-1", toolUses: 9, tokens: { input: 1, output: 1, total: 999 } },
+    "completed",
+  );
   const finished = state.snapshot().subagents[0]!;
   assert.equal(finished.toolUses, 9);
   assert.equal(finished.tokens, 999);
 
   // A poll landing after completion (race with the bus event) must not overwrite the final stats.
-  assert.equal(state.onSubagentLiveUpdate("agent-1", { rawStatus: "running", toolUses: 100, tokens: 1 }), false);
+  assert.equal(
+    state.onSubagentLiveUpdate("agent-1", { rawStatus: "running", toolUses: 100, tokens: 1 }),
+    false,
+  );
   const stillFinished = state.snapshot().subagents[0]!;
   assert.equal(stillFinished.toolUses, 9);
   assert.equal(stillFinished.tokens, 999);
@@ -322,7 +366,9 @@ test("a todo transition to completed becomes visible and lingers, then is evicte
   state.onSessionStart({});
 
   state.setTodos([{ id: "1", content: "write tests", status: "in_progress" }]);
-  assert.deepEqual(state.snapshot().todos, [{ id: "1", content: "write tests", status: "in_progress" }]);
+  assert.deepEqual(state.snapshot().todos, [
+    { id: "1", content: "write tests", status: "in_progress" },
+  ]);
 
   clock.advance(1000);
   const newlyCompleted = state.setTodos([{ id: "1", content: "write tests", status: "completed" }]);
@@ -375,7 +421,9 @@ test("message_end accumulates usage and skips error/aborted messages", () => {
   state.onSessionStart({});
 
   state.onMessageEnd({ message: { role: "assistant", usage: usage(10, 20, { cost: 0.05 }) } });
-  state.onMessageEnd({ message: { role: "assistant", stopReason: "error", usage: usage(999, 999) } });
+  state.onMessageEnd({
+    message: { role: "assistant", stopReason: "error", usage: usage(999, 999) },
+  });
   state.onMessageEnd({ message: { role: "user" } });
 
   const snapshot = state.snapshot();
@@ -448,7 +496,9 @@ test("parseTodos accepts content or text fields, normalizes status, and falls ba
   assert.deepEqual(parseTodos({ items: [{ id: "x", content: "c", status: "active" }] }), [
     { id: "x", content: "c", status: "in_progress" },
   ]);
-  assert.deepEqual(parseTodos([{ content: "bare array" }]), [{ id: "0", content: "bare array", status: "pending" }]);
+  assert.deepEqual(parseTodos([{ content: "bare array" }]), [
+    { id: "0", content: "bare array", status: "pending" },
+  ]);
 });
 
 test("parseTodos returns null for shapes it cannot recognize", () => {

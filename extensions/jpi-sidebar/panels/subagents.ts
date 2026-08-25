@@ -21,7 +21,12 @@ function liveStats(agent: SubagentEntry, now: number): string {
   return parts.join(" · ");
 }
 
-function renderSubagentBlock(agent: SubagentEntry, width: number, theme: ThemeLike, now: number): string[] {
+function renderSubagentBlock(
+  agent: SubagentEntry,
+  width: number,
+  theme: ThemeLike,
+  now: number,
+): string[] {
   const lines: string[] = [];
   const contentMax = Math.max(0, width - 2);
   const label = agent.type ? `${agent.name} (${agent.type})` : agent.name;
@@ -47,7 +52,8 @@ function renderSubagentBlock(agent: SubagentEntry, width: number, theme: ThemeLi
   if (agent.status === "running") {
     // pi-subagents' own vocabulary (queued/steered) is more specific than our
     // coarse "running", and worth showing when the registry has it.
-    const statusWord = agent.rawStatus && agent.rawStatus !== "running" ? agent.rawStatus : "running";
+    const statusWord =
+      agent.rawStatus && agent.rawStatus !== "running" ? agent.rawStatus : "running";
     lines.push(theme.fg("dim", `  ${statusWord}`));
     lines.push(theme.fg("dim", `  ${truncate(liveStats(agent, now), contentMax)}`));
     return lines;
@@ -58,7 +64,8 @@ function renderSubagentBlock(agent: SubagentEntry, width: number, theme: ThemeLi
   }
 
   const verb = agent.status === "completed" ? "complete" : "failed";
-  const suffix = agent.completedAt !== undefined ? ` (${formatRelativeTime(now - agent.completedAt)})` : "";
+  const suffix =
+    agent.completedAt !== undefined ? ` (${formatRelativeTime(now - agent.completedAt)})` : "";
   lines.push(theme.fg("dim", `  ${verb}${suffix}`));
 
   const stats = finalStats(agent);

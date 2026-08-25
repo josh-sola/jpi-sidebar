@@ -20,7 +20,10 @@ const sidebarSchema = j.node({
 
 export type SidebarSchema = typeof sidebarSchema;
 
-export function createSidebarConfig(env?: NodeJS.ProcessEnv, homeDirectory?: string): Config<SidebarSchema> {
+export function createSidebarConfig(
+  env?: NodeJS.ProcessEnv,
+  homeDirectory?: string,
+): Config<SidebarSchema> {
   return new Config("sidebar", sidebarSchema, env, homeDirectory);
 }
 
@@ -37,7 +40,9 @@ export interface LoadedSidebarSettings extends SidebarSettings {
 
 function sanitizeWidth(value: number, issues: string[]): number {
   if (!Number.isFinite(value) || value < MIN_WIDTH || value > MAX_WIDTH) {
-    issues.push(`width ${value} is out of range ${MIN_WIDTH}-${MAX_WIDTH}; using the default ${DEFAULT_WIDTH}`);
+    issues.push(
+      `width ${value} is out of range ${MIN_WIDTH}-${MAX_WIDTH}; using the default ${DEFAULT_WIDTH}`,
+    );
     return DEFAULT_WIDTH;
   }
   return value;
@@ -53,7 +58,9 @@ function sanitizeLinger(value: number, issues: string[]): number {
   return value;
 }
 
-export async function loadSidebarSettings(config: Config<SidebarSchema>): Promise<LoadedSidebarSettings> {
+export async function loadSidebarSettings(
+  config: Config<SidebarSchema>,
+): Promise<LoadedSidebarSettings> {
   const { value, issues } = await config.load();
   const collectedIssues = [...issues];
   const width = sanitizeWidth(value.width, collectedIssues);

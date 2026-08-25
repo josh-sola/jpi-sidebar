@@ -43,7 +43,11 @@ function findOwnerDescriptor(target: object, key: string): PropertyDescriptor | 
   return undefined;
 }
 
-function readDescriptorValue(descriptor: PropertyDescriptor | undefined, thisArg: unknown, fallback: number): number {
+function readDescriptorValue(
+  descriptor: PropertyDescriptor | undefined,
+  thisArg: unknown,
+  fallback: number,
+): number {
   if (!descriptor) return fallback;
   if (typeof descriptor.get === "function") return descriptor.get.call(thisArg) as number;
   return typeof descriptor.value === "number" ? descriptor.value : fallback;

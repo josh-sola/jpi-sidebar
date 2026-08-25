@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
-import { computeAppWidth, isSidebarUsable, SidebarCompositor } from "../extensions/jpi-sidebar/compositor.ts";
+import {
+  computeAppWidth,
+  isSidebarUsable,
+  SidebarCompositor,
+} from "../extensions/jpi-sidebar/compositor.ts";
 
 // Mirrors the real terminal's shape: columns/write live on the prototype, not
 // as own properties, exactly like pi's ProcessTerminal.
@@ -36,8 +40,16 @@ function moveTo(row: number, column: number): string {
   return `\x1b[${row};${column}H`;
 }
 
-function makeCompositor(terminal: FakeTerminal, mode = "fullscreen", width = 40, lines: string[] = ["line1", "line2"]) {
-  const tui = { mode, terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number } };
+function makeCompositor(
+  terminal: FakeTerminal,
+  mode = "fullscreen",
+  width = 40,
+  lines: string[] = ["line1", "line2"],
+) {
+  const tui = {
+    mode,
+    terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number },
+  };
   const compositor = new SidebarCompositor(tui, {
     getWidth: () => width,
     renderBand: () => lines,
@@ -61,7 +73,12 @@ test("install refuses a terminal without a write function", () => {
 
 test("install refuses a non-configurable own columns descriptor", () => {
   const terminal = new FakeTerminal(100, 24);
-  Object.defineProperty(terminal, "columns", { value: 100, configurable: false, enumerable: true, writable: false });
+  Object.defineProperty(terminal, "columns", {
+    value: 100,
+    configurable: false,
+    enumerable: true,
+    writable: false,
+  });
   const { compositor } = makeCompositor(terminal);
   assert.equal(compositor.install(), false);
 });
@@ -77,7 +94,10 @@ test("install narrows terminal.columns to reserve the sidebar width plus a separ
 test("the narrowed width tracks getWidth() live, without reinstalling", () => {
   const terminal = new FakeTerminal(100, 24);
   let width = 40;
-  const tui = { mode: "fullscreen", terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number } };
+  const tui = {
+    mode: "fullscreen",
+    terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number },
+  };
   const compositor = new SidebarCompositor(tui, { getWidth: () => width, renderBand: () => [] });
   compositor.install();
   assert.equal(terminal.columns, 59);
@@ -125,7 +145,10 @@ test("the appended paint string has the expected escapes and column positions", 
 test("the band is cached across writes until invalidate() is called", () => {
   const terminal = new FakeTerminal(100, 24);
   let lines = ["first"];
-  const tui = { mode: "fullscreen", terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number } };
+  const tui = {
+    mode: "fullscreen",
+    terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number },
+  };
   let renderCount = 0;
   const compositor = new SidebarCompositor(tui, {
     getWidth: () => 40,
@@ -149,7 +172,10 @@ test("the band is cached across writes until invalidate() is called", () => {
 
 test("a resize (rows or columns changed) forces a re-render even without invalidate()", () => {
   const terminal = new FakeTerminal(100, 24);
-  const tui = { mode: "fullscreen", terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number } };
+  const tui = {
+    mode: "fullscreen",
+    terminal: terminal as unknown as { write(data: string): void; columns: number; rows: number },
+  };
   let renderCount = 0;
   const compositor = new SidebarCompositor(tui, {
     getWidth: () => 40,

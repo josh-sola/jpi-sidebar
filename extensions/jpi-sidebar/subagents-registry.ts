@@ -39,11 +39,15 @@ function parseLifetimeTokens(usage: unknown): number | undefined {
 export function getSubagentManager(): SubagentManagerRegistry | undefined {
   const candidate = (globalThis as unknown as Record<symbol, unknown>)[MANAGER_KEY];
   if (!isRecord(candidate)) return undefined;
-  if (typeof candidate.getRecord !== "function" || typeof candidate.hasRunning !== "function") return undefined;
+  if (typeof candidate.getRecord !== "function" || typeof candidate.hasRunning !== "function")
+    return undefined;
   return candidate as unknown as SubagentManagerRegistry;
 }
 
-export function readLiveStats(mgr: SubagentManagerRegistry, id: string): LiveSubagentStats | undefined {
+export function readLiveStats(
+  mgr: SubagentManagerRegistry,
+  id: string,
+): LiveSubagentStats | undefined {
   let record: unknown;
   try {
     record = mgr.getRecord(id);

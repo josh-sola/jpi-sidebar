@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import { renderSessionPanel } from "../extensions/jpi-sidebar/panels/session.ts";
 import { renderSubagentsPanel } from "../extensions/jpi-sidebar/panels/subagents.ts";
@@ -112,14 +112,27 @@ test("subagents panel reports an empty state", () => {
 });
 
 test("subagents panel renders running, completed, failed, and lost blocks distinctly", () => {
-  const running = renderSubagentsPanel(baseSnapshot({ subagents: [agent({ status: "running" })] }), 40, theme, 5000).join("\n");
+  const running = renderSubagentsPanel(
+    baseSnapshot({ subagents: [agent({ status: "running" })] }),
+    40,
+    theme,
+    5000,
+  ).join("\n");
   assert.match(running, /●.*Investigate bug/);
   assert.match(running, /running/);
   assert.match(running, /5s/);
 
   const completed = renderSubagentsPanel(
     baseSnapshot({
-      subagents: [agent({ status: "completed", completedAt: 4000, toolUses: 3, tokens: 1500, durationMs: 4000 })],
+      subagents: [
+        agent({
+          status: "completed",
+          completedAt: 4000,
+          toolUses: 3,
+          tokens: 1500,
+          durationMs: 4000,
+        }),
+      ],
     }),
     40,
     theme,
@@ -138,7 +151,12 @@ test("subagents panel renders running, completed, failed, and lost blocks distin
   assert.match(failed, /✗.*Investigate bug/);
   assert.match(failed, /failed \(0s ago\)/);
 
-  const lost = renderSubagentsPanel(baseSnapshot({ subagents: [agent({ status: "lost" })] }), 40, theme, 5000).join("\n");
+  const lost = renderSubagentsPanel(
+    baseSnapshot({ subagents: [agent({ status: "lost" })] }),
+    40,
+    theme,
+    5000,
+  ).join("\n");
   assert.match(lost, /Investigate bug/);
   assert.match(lost, /lost/);
 });
@@ -155,7 +173,9 @@ test("subagents panel shows a queued/steered raw status word and a live stats li
 
   const live = renderSubagentsPanel(
     baseSnapshot({
-      subagents: [agent({ status: "running", rawStatus: "running", toolUses: 2, tokens: 1500, cost: 0.4567 })],
+      subagents: [
+        agent({ status: "running", rawStatus: "running", toolUses: 2, tokens: 1500, cost: 0.4567 }),
+      ],
     }),
     40,
     theme,

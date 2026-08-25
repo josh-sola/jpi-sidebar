@@ -14,7 +14,8 @@ interface Panel {
 const PANELS: readonly Panel[] = [
   { title: () => "Session", render: renderSessionPanel },
   {
-    title: (state) => `Todos (${state.todos.filter((todo) => todo.status === "completed").length}/${state.todos.length})`,
+    title: (state) =>
+      `Todos (${state.todos.filter((todo) => todo.status === "completed").length}/${state.todos.length})`,
     render: renderTodosPanel,
   },
   {

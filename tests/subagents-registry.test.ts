@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vite-plus/test";
 
 import { getSubagentManager, readLiveStats } from "../extensions/jpi-sidebar/subagents-registry.ts";
 
@@ -11,7 +11,8 @@ function withManager<T>(value: unknown, fn: () => T): T {
   try {
     return fn();
   } finally {
-    if (original === undefined) delete (globalThis as unknown as Record<symbol, unknown>)[MANAGER_KEY];
+    if (original === undefined)
+      delete (globalThis as unknown as Record<symbol, unknown>)[MANAGER_KEY];
     else (globalThis as unknown as Record<symbol, unknown>)[MANAGER_KEY] = original;
   }
 }
@@ -92,7 +93,10 @@ test("readLiveStats omits tokens/cost when lifetimeUsage is missing or malformed
     compactionCount: undefined,
   });
 
-  const partialUsage = { getRecord: () => ({ status: "running", lifetimeUsage: { input: 1 } }), hasRunning: () => true };
+  const partialUsage = {
+    getRecord: () => ({ status: "running", lifetimeUsage: { input: 1 } }),
+    hasRunning: () => true,
+  };
   const stats = readLiveStats(partialUsage, "a1");
   assert.equal(stats?.tokens, undefined);
 });

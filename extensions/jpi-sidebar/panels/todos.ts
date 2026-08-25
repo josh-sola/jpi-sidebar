@@ -20,7 +20,11 @@ function renderTodoLine(todo: TodoItem, width: number, theme: ThemeLike): string
   return `${glyph} ${truncate(todo.content, contentMax)}`;
 }
 
-export function renderTodosPanel(state: SidebarSnapshot, width: number, theme: ThemeLike): string[] {
+export function renderTodosPanel(
+  state: SidebarSnapshot,
+  width: number,
+  theme: ThemeLike,
+): string[] {
   if (state.todos.length === 0) return [theme.fg("dim", "  (no todos)")];
   return state.todos.map((todo) => renderTodoLine(todo, width, theme));
 }

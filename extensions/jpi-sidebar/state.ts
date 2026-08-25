@@ -1,4 +1,8 @@
-import { SUBAGENT_STALE_MS, type SubagentFinishedPayload, type SubagentStartedPayload } from "./subagents-bus.ts";
+import {
+  SUBAGENT_STALE_MS,
+  type SubagentFinishedPayload,
+  type SubagentStartedPayload,
+} from "./subagents-bus.ts";
 import type { LiveSubagentStats } from "./subagents-registry.ts";
 
 const TODO_TOOL_PATTERN = /todo/i;
@@ -95,7 +99,9 @@ export interface ModelInfo {
 }
 
 export interface ContextUsageInput {
-  getContextUsage?(): { tokens?: number | null; contextWindow?: number | null; percent?: number | null } | undefined;
+  getContextUsage?():
+    | { tokens?: number | null; contextWindow?: number | null; percent?: number | null }
+    | undefined;
   model?: ModelInfo;
 }
 
@@ -137,7 +143,9 @@ export interface ModelSelectInput {
 function firstText(content: MessageLike["content"]): string | undefined {
   if (typeof content === "string") return content.trim() || undefined;
   if (Array.isArray(content)) {
-    const part = content.find((candidate) => candidate?.type === "text" && Boolean(candidate.text?.trim()));
+    const part = content.find(
+      (candidate) => candidate?.type === "text" && Boolean(candidate.text?.trim()),
+    );
     return part?.text?.trim();
   }
   return undefined;
@@ -147,7 +155,8 @@ function textLength(content: MessageLike["content"]): number {
   if (typeof content === "string") return content.length;
   if (Array.isArray(content)) {
     return content.reduce(
-      (sum, part) => sum + (part?.type === "text" && typeof part.text === "string" ? part.text.length : 0),
+      (sum, part) =>
+        sum + (part?.type === "text" && typeof part.text === "string" ? part.text.length : 0),
       0,
     );
   }
@@ -155,7 +164,11 @@ function textLength(content: MessageLike["content"]): number {
 }
 
 function truncateTitle(text: string): string {
-  const line = text.split("\n").map((part) => part.trim()).find((part) => part.length > 0) ?? text.trim();
+  const line =
+    text
+      .split("\n")
+      .map((part) => part.trim())
+      .find((part) => part.length > 0) ?? text.trim();
   return line.length > TITLE_MAX_LENGTH ? `${line.slice(0, TITLE_MAX_LENGTH - 1)}…` : line;
 }
 
@@ -170,7 +183,12 @@ export function parseTodos(input: unknown): TodoItem[] | null {
   for (const candidate of raw) {
     if (!candidate || typeof candidate !== "object") continue;
     const item = candidate as Record<string, unknown>;
-    const content = typeof item.content === "string" ? item.content : typeof item.text === "string" ? item.text : null;
+    const content =
+      typeof item.content === "string"
+        ? item.content
+        : typeof item.text === "string"
+          ? item.text
+          : null;
     if (!content) continue;
 
     const rawStatus = typeof item.status === "string" ? item.status : "pending";
@@ -201,7 +219,8 @@ function isHeuristicSubagentTool(toolName: string): boolean {
 
 /** pi-subagents' own status vocabulary, coarsened to what the glyph needs. Unrecognized words map to nothing. */
 function mapRawStatus(rawStatus: string): SubagentStatus | undefined {
-  if (rawStatus === "queued" || rawStatus === "running" || rawStatus === "steered") return "running";
+  if (rawStatus === "queued" || rawStatus === "running" || rawStatus === "steered")
+    return "running";
   if (rawStatus === "completed" || rawStatus === "stopped") return "completed";
   if (rawStatus === "error" || rawStatus === "aborted") return "failed";
   return undefined;
@@ -581,7 +600,11 @@ export class SidebarState {
       }
     }
     for (const [id, entry] of this.subagents) {
-      if (entry.status !== "running" && entry.completedAt !== undefined && now - entry.completedAt > this.lingerMs) {
+      if (
+        entry.status !== "running" &&
+        entry.completedAt !== undefined &&
+        now - entry.completedAt > this.lingerMs
+      ) {
         this.subagents.delete(id);
       }
     }
