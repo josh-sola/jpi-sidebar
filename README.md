@@ -1,8 +1,7 @@
 # jpi-sidebar
 
 An OpenCode-style sidebar for Pi's fullscreen TUI. It shows live session
-stats, todos, and subagents down one edge of the terminal — the left edge by
-default, or the right, depending on config.
+stats, todos, and subagents down the right edge of the terminal.
 
 **This only works when pi is running its fullscreen renderer** (start it with
 `--tui-mode fullscreen`). In regular mode jpi-sidebar does nothing at all — no
@@ -55,22 +54,18 @@ sidebar {
   enabled #true
   width 40
   linger 30
-  position "left"
 }
 ```
 
 `width` is clamped to 10–120; a value outside that range is treated as the
 default (40) and reported as a warning at session start. `linger` (0–600,
 default 30) is how many seconds a completed todo or a finished subagent stays
-visible before it's dropped from its panel. `position` is `"left"` or
-`"right"` (case-insensitive); any other value is treated as the default
-(`"left"`) and reported as a warning at session start.
+visible before it's dropped from its panel.
 
 ## Commands
 
 - `/sidebar on` / `/sidebar off` — toggle the sidebar for future frames.
 - `/sidebar width <10-120>` — resize it.
-- `/sidebar position <left|right>` — move it to the other edge.
 - **Alt+S** — toggle the sidebar without typing a command.
 
 Each of these writes the change straight into the `sidebar { }` section of

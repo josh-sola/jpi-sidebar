@@ -23,39 +23,14 @@ export interface CompositorTui {
   readonly terminal: CompositorTerminal;
 }
 
-export type SidebarPosition = "left" | "right";
-
 export interface SidebarCompositorOptions {
   /** Configured sidebar width; read fresh every paint so runtime changes apply immediately. */
   getWidth(): number;
-  /** Configured sidebar position; read fresh every paint so runtime changes apply immediately. */
-  getPosition(): SidebarPosition;
   renderBand(width: number, rows: number): string[];
 }
 
 function moveTo(row: number, column: number): string {
   return `\x1b[${row};${column}H`;
-}
-
-// Matches every CUP form pi-tui emits: `\x1b[H`, `\x1b[{row}H`, and
-// `\x1b[{row};{col}H`. Anchors both ends of the params so it never matches a
-// longer CSI sequence that happens to end in a number and "H".
-const CUP_PATTERN = /\x1b\[(\d*)(?:;(\d*))?H/g;
-const ALT_SCREEN_EXIT = "\x1b[?1049l";
-
-/**
- * Shifts every CUP in a frame right by `offset` columns and widens EL2
- * (erase whole line) to EL0 (erase to end), so pi's content lands past the
- * left-hand band instead of overwriting it.
- */
-export function shiftFrame(data: string, offset: number): string {
-  return data
-    .replace(CUP_PATTERN, (_match, rowStr: string, colStr: string | undefined) => {
-      const row = rowStr === "" ? 1 : Number(rowStr);
-      const col = colStr === undefined ? 1 : colStr === "" ? 1 : Number(colStr);
-      return moveTo(row, col + offset);
-    })
-    .replaceAll("\x1b[2K", "\x1b[0K");
 }
 
 function findOwnerDescriptor(target: object, key: string): PropertyDescriptor | undefined {
@@ -98,13 +73,12 @@ function fitToWidth(line: string, width: number): string {
 }
 
 /**
- * Reserves an edge of pi's fullscreen terminal for a sidebar band and
+ * Reserves the right edge of pi's fullscreen terminal for a sidebar band and
  * repaints it into every frame pi's own renderer writes.
  */
 export class SidebarCompositor {
   private readonly tui: CompositorTui;
   private readonly getWidth: () => number;
-  private readonly getPosition: () => SidebarPosition;
   private readonly renderBand: (width: number, rows: number) => string[];
 
   private installed = false;
@@ -121,13 +95,7 @@ export class SidebarCompositor {
   constructor(tui: CompositorTui, options: SidebarCompositorOptions) {
     this.tui = tui;
     this.getWidth = options.getWidth;
-    this.getPosition = options.getPosition;
     this.renderBand = options.renderBand;
-  }
-
-  private getRawColumns(): number {
-    const terminal = this.tui.terminal;
-    return readDescriptorValue(this.rawColumnsDescriptor, terminal, terminal.columns);
   }
 
   /** Fails closed: any capability gap leaves the terminal untouched. */
@@ -169,18 +137,11 @@ export class SidebarCompositor {
       enumerable: this.ownWriteDescriptor?.enumerable ?? false,
       writable: true,
       value(data: string) {
-        if (typeof data !== "string" || !data.includes(FRAME_MARKER)) {
+        if (typeof data === "string" && data.includes(FRAME_MARKER)) {
+          originalWrite(data + self.paint());
+        } else {
           originalWrite(data);
-          return;
         }
-        if (self.getPosition() === "left") {
-          const width = self.getWidth();
-          const usable = isSidebarUsable(self.getRawColumns(), width);
-          if (usable && !data.includes(ALT_SCREEN_EXIT)) {
-            data = shiftFrame(data, width + 1);
-          }
-        }
-        originalWrite(data + self.paint());
       },
     });
 
@@ -196,7 +157,7 @@ export class SidebarCompositor {
 
   private paint(): string {
     const terminal = this.tui.terminal;
-    const rawColumns = this.getRawColumns();
+    const rawColumns = readDescriptorValue(this.rawColumnsDescriptor, terminal, terminal.columns);
     const rows = terminal.rows;
     const width = this.getWidth();
 
@@ -209,20 +170,15 @@ export class SidebarCompositor {
       this.dirty = false;
     }
 
-    const left = this.getPosition() === "left";
-    const separatorColumn = left ? width + 1 : computeAppWidth(rawColumns, width) + 1;
-    const bandColumn = left ? 1 : separatorColumn + 1;
+    const appWidth = computeAppWidth(rawColumns, width);
+    const separatorColumn = appWidth + 1;
+    const bandColumn = separatorColumn + 1;
 
     let out = `${SYNC_BEGIN}${SAVE_CURSOR}${AUTOWRAP_OFF}`;
     for (let row = 1; row <= rows; row += 1) {
       const line = fitToWidth(this.cachedLines[row - 1] ?? "", width);
-      if (left) {
-        out += `${moveTo(row, bandColumn)}${line}`;
-        out += `${moveTo(row, separatorColumn)}${DIM}${SEPARATOR_GLYPH}${RESET}`;
-      } else {
-        out += `${moveTo(row, separatorColumn)}${DIM}${SEPARATOR_GLYPH}${RESET}`;
-        out += `${moveTo(row, bandColumn)}${line}`;
-      }
+      out += `${moveTo(row, separatorColumn)}${DIM}${SEPARATOR_GLYPH}${RESET}`;
+      out += `${moveTo(row, bandColumn)}${line}`;
     }
     out += `${AUTOWRAP_ON}${RESTORE_CURSOR}${SYNC_END}`;
     return out;
