@@ -9,7 +9,7 @@
     "test": "vp test"
   },
   "dependencies": {
-    "jpi-base": "github:josh-sola/jpi-base#semver:^0.7.0"
+    "jpi-base": "github:josh-sola/jpi-base#semver:^0.8.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.84.0",
